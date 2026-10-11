@@ -5,6 +5,7 @@ from datetime import datetime
 import time
 from google.transit import gtfs_realtime_pb2
 from gtfs_static import gtfs_manager
+from notifier import send_telegram_alert
 
 GTT_RAW_URL = "https://www.gtt.to.it/cms/index.php?option=com_gtt&view=avvisi&tmpl=raw&priorita=1"
 
@@ -81,6 +82,8 @@ def fetch_gtt_alerts():
                 })
 
     except Exception as e:
-        print(f"[Scraper] Errore: {e}")
+        error_msg = f"Errore critico nello scraper GTT: {e}"
+        print(f"[Scraper] {error_msg}")
+        send_telegram_alert(error_msg)
 
     return alerts
