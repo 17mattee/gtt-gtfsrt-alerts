@@ -1,13 +1,16 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime
 import time
+import logging
 from google.transit import gtfs_realtime_pb2
-from gtfs_static import gtfs_manager
-from notifier import send_telegram_alert
+from app.gtfs_static import gtfs_manager
+from app.notifier import send_telegram_alert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+logger = logging.getLogger("GTT-Scraper")
 GTT_RAW_URL = "https://www.gtt.to.it/cms/index.php?option=com_gtt&view=avvisi&tmpl=raw&priorita=1"
 
 def parse_cause(text: str):
@@ -93,7 +96,7 @@ def fetch_gtt_alerts():
 
     except Exception as e:
         error_msg = f"Errore critico nello scraper GTT dopo i retry: {e}"
-        print(f"[Scraper] {error_msg}")
+        logger.error(error_msg)
         send_telegram_alert(error_msg)
 
     return alerts

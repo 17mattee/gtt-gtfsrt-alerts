@@ -1,35 +1,40 @@
 import time
+import logging
+import threading
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, HTMLResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from google.transit import gtfs_realtime_pb2
-from gtfs_static import gtfs_manager
-from scraper import fetch_gtt_alerts
-from database import save_alerts_to_db
+from app.gtfs_static import gtfs_manager
+from app.scraper import fetch_gtt_alerts
+from app.database import save_alerts_to_db
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-# Configurazione del Limiter per prevenire abusi / attacchi DoS
+# Configurazione Logging Strutturato
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("GTT-Main")
+
 limiter = Limiter(key_func=get_remote_address)
 
 ALERTS_DATA_CACHE = []
+cache_lock = threading.Lock()  # Thread Lock per prevenire race conditions
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Inizializzazione dati statici GTFS
     gtfs_manager._ensure_data_loaded()
     
-    # Primo scraping immediato all'avvio
     global ALERTS_DATA_CACHE
-    print("[Scheduler] Primo avvio scraping GTT...")
+    logger.info("Primo avvio scraping GTT...")
     initial_alerts = fetch_gtt_alerts()
     if initial_alerts:
-        ALERTS_DATA_CACHE = initial_alerts
+        with cache_lock:
+            ALERTS_DATA_CACHE = initial_alerts
         save_alerts_to_db(initial_alerts)
 
-    # Scheduler in background (aggiornamento ogni 2 minuti)
     scheduler = BackgroundScheduler()
     scheduler.add_job(job_update_alerts, 'interval', minutes=2)
     scheduler.start()
@@ -40,27 +45,33 @@ async def lifespan(app: FastAPI):
 
 def job_update_alerts():
     global ALERTS_DATA_CACHE
-    print("[Scheduler] Aggiornamento feed GTFS-RT...")
+    logger.info("Aggiornamento periodico feed GTFS-RT...")
     alerts = fetch_gtt_alerts()
     if alerts:
-        ALERTS_DATA_CACHE = alerts
+        with cache_lock:
+            ALERTS_DATA_CACHE = alerts
         save_alerts_to_db(alerts)
-        print(f"[Scheduler] Feed aggiornato con {len(alerts)} avvisi.")
+        logger.info(f"Feed aggiornato con {len(alerts)} avvisi.")
 
 app = FastAPI(
     title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise ad alta affidabilità per la conversione degli avvisi GTT in formato GTFS-Realtime Protobuf.",
-    version="1.0.0",
+    description="Middleware enterprise ad alta affidabilità con Gzip, Thread Locking e Storico Supabase.",
+    version="1.1.0",
     lifespan=lifespan
 )
 
-# Registrazione handler per il Rate Limiting
+# Abilitazione compressione Gzip per ridurre la latenza di rete
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.get("/", response_class=HTMLResponse)
 @limiter.limit("30/minute")
 def dashboard(request: Request):
+    with cache_lock:
+        cache_len = len(ALERTS_DATA_CACHE)
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="it">
@@ -79,20 +90,21 @@ def dashboard(request: Request):
     </head>
     <body>
         <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">ONLINE & SECURED</span></h1>
-            <p>Sistema di traduzione in tempo reale degli avvisi di infomobilità GTT Torino nello standard internazionale GTFS-Realtime.</p>
+            <h1>GTT GTFS-RT Middleware <span class="badge">OPTIMIZED & SECURED</span></h1>
+            <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
             
             <h3>Endpoint Protobuf Ufficiale:</h3>
             <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb" style="color: #38bdf8; text-decoration: none;">/gtfs-rt/alerts.pb</a></div>
             
             <h3>Stato Attuale:</h3>
-            <p>Avvisi attivi processati in memoria: <strong>{len(ALERTS_DATA_CACHE)}</strong></p>
+            <p>Avvisi attivi processati in memoria: <strong>{cache_len}</strong></p>
             
-            <h3>Architettura di Sicurezza:</h3>
+            <h3>Ottimizzazioni Architetturali:</h3>
             <ul>
-                <li><strong>Rate Limiting:</strong> Attivo (Protezione Anti-DoS)</li>
-                <li><strong>Retry Policies:</strong> Attive su Scraper e Supabase</li>
-                <li><strong>Persistence:</strong> Storico PostgreSQL permanente</li>
+                <li><strong>Gzip Compression:</strong> Attiva (Payload alleggeriti)</li>
+                <li><strong>Thread Safety (Locking):</strong> Attivo (Zero Race Conditions)</li>
+                <li><strong>Rate Limiting & Retries:</strong> Attivi e protetti</li>
+                <li><strong>Persistence:</strong> Storico PostgreSQL permanente su Supabase</li>
             </ul>
         </div>
     </body>
@@ -108,7 +120,10 @@ def get_gtfs_rt_alerts(request: Request):
     feed.header.incrementality = gtfs_realtime_pb2.FeedHeader.FULL_DATASET
     feed.header.timestamp = int(time.time())
 
-    for item in ALERTS_DATA_CACHE:
+    with cache_lock:
+        current_alerts = list(ALERTS_DATA_CACHE)
+
+    for item in current_alerts:
         entity = feed.entity.add()
         entity.id = item["id"]
         entity.is_deleted = False
@@ -117,16 +132,13 @@ def get_gtfs_rt_alerts(request: Request):
         alert.cause = item["cause"]
         alert.effect = item["effect"]
 
-        # Intervallo di validità
         active_period = alert.active_period.add()
         active_period.start = item["start_time"]
 
-        # Linee impattate
         for r_id in item["route_ids"]:
             informed_entity = alert.informed_entity.add()
             informed_entity.route_id = r_id
 
-        # Testi descrittivi (Header e Descrizione)
         header_text = alert.header_text.translation.add()
         header_text.text = item["title"]
         header_text.language = "it"

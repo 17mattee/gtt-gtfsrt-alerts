@@ -1,7 +1,10 @@
 import os
+import logging
 import psycopg
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+logger = logging.getLogger("GTT-Database")
 
 @retry(
     stop=stop_after_attempt(3),
@@ -12,7 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 def save_alerts_to_db(alerts: list):
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        print("[Database] URL di connessione non trovato. Salvataggio storico saltato.")
+        logger.warning("URL di connessione non trovato. Salvataggio storico saltato.")
         return
 
     try:
@@ -37,7 +40,7 @@ def save_alerts_to_db(alerts: list):
                         )
                     )
                 conn.commit()
-        print(f"[Database] Salvati con successo {len(alerts)} avvisi nello storico Supabase.")
+        logger.info(f"Salvati con successo {len(alerts)} avvisi nello storico Supabase.")
     except Exception as e:
-        print(f"[Database] Errore durante il salvataggio su Supabase: {e}")
+        logger.error(f"Errore durante il salvataggio su Supabase: {e}")
         raise
