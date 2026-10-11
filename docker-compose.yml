@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  gtt-alerts-engine:
+    build: .
+    container_name: gtt_gtfsrt_alerts
+    ports:
+      - "8000:8000"
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
