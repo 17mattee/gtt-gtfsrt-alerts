@@ -1,94 +1,139 @@
-import os
 import time
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, HTMLResponse
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response
-from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from google.transit import gtfs_realtime_pb2
-from scraper import fetch_gtt_alerts
 from gtfs_static import gtfs_manager
+from scraper import fetch_gtt_alerts
+from database import save_alerts_to_db
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
-FEED_CACHE = b""
+# Configurazione del Limiter per prevenire abusi / attacchi DoS
+limiter = Limiter(key_func=get_remote_address)
+
 ALERTS_DATA_CACHE = []
-
-def update_feed_cache():
-    global FEED_CACHE, ALERTS_DATA_CACHE
-    print("[Scheduler] Aggiornamento feed GTFS-RT...")
-    alerts = fetch_gtt_alerts()
-    ALERTS_DATA_CACHE = alerts
-    
-    feed = gtfs_realtime_pb2.FeedMessage()
-    feed.header.gtfs_realtime_version = "2.0"
-    feed.header.timestamp = int(time.time())
-    
-    for alert_data in alerts:
-        entity = feed.entity.add()
-        entity.id = alert_data["id"]
-        
-        # Scrive l'orario di inizio nel Protobuf (Active Period)
-        if "start_time" in alert_data:
-            active_period = entity.alert.active_period.add()
-            active_period.start = alert_data["start_time"]
-        
-        for route_id in alert_data["route_ids"]:
-            selector = entity.alert.informed_entity.add()
-            selector.route_id = route_id
-            
-        if not alert_data["route_ids"]:
-            selector = entity.alert.informed_entity.add()
-            selector.agency_id = "GTT"
-            
-        entity.alert.cause = alert_data["cause"]
-        entity.alert.effect = alert_data["effect"]
-        
-        header = entity.alert.header_text.translation.add()
-        header.text = alert_data["title"]
-        header.language = "it"
-        
-        desc = entity.alert.description_text.translation.add()
-        desc.text = alert_data["description"]
-        desc.language = "it"
-        
-    FEED_CACHE = feed.SerializeToString()
-    print(f"[Scheduler] Feed aggiornato con {len(alerts)} avvisi.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Inizializzazione dati statici GTFS
     gtfs_manager._ensure_data_loaded()
-    update_feed_cache()
+    
+    # Primo scraping immediato all'avvio
+    global ALERTS_DATA_CACHE
+    print("[Scheduler] Primo avvio scraping GTT...")
+    initial_alerts = fetch_gtt_alerts()
+    if initial_alerts:
+        ALERTS_DATA_CACHE = initial_alerts
+        save_alerts_to_db(initial_alerts)
+
+    # Scheduler in background (aggiornamento ogni 2 minuti)
     scheduler = BackgroundScheduler()
-    scheduler.add_job(update_feed_cache, 'interval', minutes=2)
+    scheduler.add_job(job_update_alerts, 'interval', minutes=2)
     scheduler.start()
+    
     yield
+    
     scheduler.shutdown()
 
-app = FastAPI(lifespan=lifespan, title="GTT GTFS-RT Alerts")
+def job_update_alerts():
+    global ALERTS_DATA_CACHE
+    print("[Scheduler] Aggiornamento feed GTFS-RT...")
+    alerts = fetch_gtt_alerts()
+    if alerts:
+        ALERTS_DATA_CACHE = alerts
+        save_alerts_to_db(alerts)
+        print(f"[Scheduler] Feed aggiornato con {len(alerts)} avvisi.")
 
-@app.get("/gtfs-rt/alerts.pb")
-def get_alerts_pb():
-    return Response(content=FEED_CACHE, media_type="application/x-protobuf")
+app = FastAPI(
+    title="GTT Turin GTFS-RT Middleware",
+    description="Middleware enterprise ad alta affidabilità per la conversione degli avvisi GTT in formato GTFS-Realtime Protobuf.",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Registrazione handler per il Rate Limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard():
-    html = "<html><head><title>Dashboard GTT GTFS-RT</title><meta charset='utf-8'><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif; margin:40px; background:#f4f4f9;} .alert{background:white; border:1px solid #ddd; padding:20px; margin-bottom:15px; border-radius:10px; box-shadow:0 2px 4px rgba(0,0,0,0.05);} .badge{background:#007bff; color:white; padding:4px 10px; border-radius:6px; font-weight:bold; font-size:14px; margin-right:5px;} .date{color:#666; font-size:13px; margin-bottom:10px;}</style></head><body>"
-    html += "<h1>🚌 Monitoraggio Avvisi GTT (GTFS-RT)</h1>"
-    html += f"<p style='color:#666;'>Ultimo aggiornamento: {time.strftime('%H:%M:%S')}</p><hr>"
-    
-    if not ALERTS_DATA_CACHE:
-        html += "<p>Nessun avviso attivo sulla rete.</p>"
-    else:
-        for a in ALERTS_DATA_CACHE:
-            start_str = time.strftime('%d/%m/%Y %H:%M', time.localtime(a['start_time'])) if a.get('start_time') else 'Ora'
-            html += f"<div class='alert'><h3>{a['title']}</h3>"
-            html += f"<div class='date'>Attivo da: {start_str}</div>"
-            if a['route_ids']:
-                html += "<p><strong>Linee in deviazione:</strong> "
-                for r in a['route_ids']:
-                    html += f"<span class='badge'>{r}</span>"
-                html += "</p>"
-            else:
-                html += "<p><strong>Linee in deviazione:</strong> <span class='badge' style='background:#6c757d;'>Generale / Tutte</span></p>"
-            html += f"<p>{a['description']}</p></div>"
-    
-    html += "</body></html>"
-    return html
+@limiter.limit("30/minute")
+def dashboard(request: Request):
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="it">
+    <head>
+        <meta charset="UTF-8">
+        <title>GTT GTFS-RT Dashboard</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; margin: 0; }}
+            .container {{ max-width: 800px; margin: auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }}
+            h1 {{ color: #38bdf8; margin-top: 0; }}
+            .badge {{ background: #22c55e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }}
+            .endpoint {{ background: #0f172a; padding: 12px; border-radius: 6px; margin-top: 15px; font-family: monospace; color: #38bdf8; }}
+            ul {{ padding-left: 20px; }}
+            li {{ margin-bottom: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>GTT GTFS-RT Middleware <span class="badge">ONLINE & SECURED</span></h1>
+            <p>Sistema di traduzione in tempo reale degli avvisi di infomobilità GTT Torino nello standard internazionale GTFS-Realtime.</p>
+            
+            <h3>Endpoint Protobuf Ufficiale:</h3>
+            <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb" style="color: #38bdf8; text-decoration: none;">/gtfs-rt/alerts.pb</a></div>
+            
+            <h3>Stato Attuale:</h3>
+            <p>Avvisi attivi processati in memoria: <strong>{len(ALERTS_DATA_CACHE)}</strong></p>
+            
+            <h3>Architettura di Sicurezza:</h3>
+            <ul>
+                <li><strong>Rate Limiting:</strong> Attivo (Protezione Anti-DoS)</li>
+                <li><strong>Retry Policies:</strong> Attive su Scraper e Supabase</li>
+                <li><strong>Persistence:</strong> Storico PostgreSQL permanente</li>
+            </ul>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+@app.get("/gtfs-rt/alerts.pb")
+@limiter.limit("60/minute")
+def get_gtfs_rt_alerts(request: Request):
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.incrementality = gtfs_realtime_pb2.FeedHeader.FULL_DATASET
+    feed.header.timestamp = int(time.time())
+
+    for item in ALERTS_DATA_CACHE:
+        entity = feed.entity.add()
+        entity.id = item["id"]
+        entity.is_deleted = False
+
+        alert = entity.alert
+        alert.cause = item["cause"]
+        alert.effect = item["effect"]
+
+        # Intervallo di validità
+        active_period = alert.active_period.add()
+        active_period.start = item["start_time"]
+
+        # Linee impattate
+        for r_id in item["route_ids"]:
+            informed_entity = alert.informed_entity.add()
+            informed_entity.route_id = r_id
+
+        # Testi descrittivi (Header e Descrizione)
+        header_text = alert.header_text.translation.add()
+        header_text.text = item["title"]
+        header_text.language = "it"
+
+        description_text = alert.description_text.translation.add()
+        description_text.text = item["description"]
+        description_text.language = "it"
+
+    binary_data = feed.SerializeToString()
+    return Response(content=binary_data, media_type="application/x-protobuf")
