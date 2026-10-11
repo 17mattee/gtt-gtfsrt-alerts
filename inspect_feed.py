@@ -1,37 +1,38 @@
-import requests
+import httpx
 from google.transit import gtfs_realtime_pb2
-
-URL = "http://127.0.0.1:8000/gtfs-rt/alerts.pb"
+from datetime import datetime
 
 def inspect():
     try:
-        response = requests.get(URL, timeout=5)
-        if response.status_code != 200:
-            print(f"Errore server: {response.status_code}")
-            return
-
+        response = httpx.get("http://127.0.0.1:8000/gtfs-rt/alerts.pb", timeout=5)
+        response.raise_for_status()
+        
         feed = gtfs_realtime_pb2.FeedMessage()
         feed.ParseFromString(response.content)
-
-        print("=== HEADER GTFS-RT ===")
+        
+        print("\n=== HEADER GTFS-RT ===")
         print(f"Versione: {feed.header.gtfs_realtime_version}")
-        print(f"Timestamp: {feed.header.timestamp}")
-        print(f"\n=== AVVISI TROVATI ({len(feed.entity)}) ===")
-
+        print(f"Timestamp: {feed.header.timestamp}\n")
+        print(f"=== AVVISI TROVATI ({len(feed.entity)}) ===\n")
+        
         for entity in feed.entity:
-            print(f"\nID Entità: {entity.id}")
-            alert = entity.alert
+            print(f"ID Entità: {entity.id}")
             
-            lines = [e.route_id for e in alert.informed_entity if e.route_id]
-            print(f"Linee impattate: {', '.join(lines) if lines else 'Generale'}")
+            if len(entity.alert.active_period) > 0:
+                start_ts = entity.alert.active_period[0].start
+                print(f"Inizio Validità: {datetime.fromtimestamp(start_ts).strftime('%d/%m/%Y %H:%M')}")
             
-            if alert.header_text.translation:
-                print(f"Titolo: {alert.header_text.translation[0].text}")
-            if alert.description_text.translation:
-                print(f"Dettagli: {alert.description_text.translation[0].text}")
-
+            route_ids = [ie.route_id for ie in entity.alert.informed_entity if ie.route_id]
+            if route_ids:
+                print(f"Linee impattate: {', '.join(route_ids)}")
+            else:
+                print("Linee impattate: Generale")
+            
+            print(f"Titolo: {entity.alert.header_text.translation[0].text}")
+            print(f"Dettagli: {entity.alert.description_text.translation[0].text}\n")
+            
     except Exception as e:
-        print(f"Errore durante l'ispezione: {e}")
+        print(f"Errore: {e}")
 
 if __name__ == "__main__":
     inspect()
