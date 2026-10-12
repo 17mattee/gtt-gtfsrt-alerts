@@ -35,6 +35,49 @@ TURIN_BBOX = {"lat_min": 44.0, "lat_max": 46.0, "lon_min": 6.0, "lon_max": 9.0}
 # Sorgente dell'ultimo fetch: "live" (feed ufficiale GTT) oppure "simulated" (fallback).
 last_fetch_source = "unknown"
 
+# Il feed veicoli di GTT NON trasmette il campo speed: lo calcoliamo dalla
+# distanza tra posizioni GPS consecutive (dato reale, mai inventato).
+_previous_positions: dict = {}  # vehicle_id -> (lat, lon, timestamp)
+MAX_REALISTIC_SPEED_MS = 30.0  # ~108 km/h: soglia anti-GPS-jitter
+
+
+def _haversine_meters(lat1, lon1, lat2, lon2) -> float:
+    """Distanza reale in metri tra due punti GPS (formula di haversine)."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = p2 - p1
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _real_speed(vehicle: dict):
+    """Velocita' reale in m/s derivata dagli spostamenti GPS tra cicli consecutivi.
+
+    Restituisce None se il mezzo e' comparso per la prima volta e il feed
+    non fornisce il dato: in quel caso la UI mostra 'n/d' invece di inventare uno zero.
+    """
+    vid = vehicle.get("vehicle_id")
+    lat, lon = vehicle.get("latitude"), vehicle.get("longitude")
+    ts = vehicle.get("timestamp") or int(time.time())
+    prev = _previous_positions.get(vid)
+
+    # Registra la posizione corrente per il prossimo ciclo.
+    _previous_positions[vid] = (lat, lon, ts)
+
+    if prev is None:
+        return None
+
+    prev_lat, prev_lon, prev_ts = prev
+    dt = ts - prev_ts
+    if dt <= 0:
+        return None
+    dist = _haversine_meters(prev_lat, prev_lon, lat, lon)
+    speed = dist / dt
+    if speed > MAX_REALISTIC_SPEED_MS:
+        return None  # salto GPS: dato inaffidabile, meglio nessun valore
+    return round(speed, 1)
+
 # Corridoi reali del centro di Torino per la flotta di fallback:
 # M1 (Fermi-Bengasi), Via Po, Corso Vittorio, Porta Nuova, Piazza Statuto, Lingotto.
 CORRIDORS = [
@@ -82,21 +125,31 @@ async def fetch_gtt_vehicle_positions() -> list:
                     if not (TURIN_BBOX["lon_min"] <= lon <= TURIN_BBOX["lon_max"]):
                         continue
                     route_id = v.trip.route_id if v.HasField("trip") else ""
-                    vehicles.append({
+                    vehicle = {
                         "vehicle_id": v.vehicle.id or "GTT-BUS",
                         "trip_id": v.trip.trip_id if v.HasField("trip") else "N/A",
                         # route_id GTFS (es. "2U") tradotto nel nome linea reale (es. "2")
                         "route_id": gtfs_manager.get_route_short_name(route_id) or "N/A",
                         "latitude": lat,
                         "longitude": lon,
-                        "bearing": v.position.bearing if (v.HasField("position") and v.position.HasField("bearing")) else 0.0,
-                        "speed": v.position.speed if (v.HasField("position") and v.position.HasField("speed")) else 0.0,
+                        "bearing": v.position.bearing if (v.HasField("position") and v.position.HasField("bearing")) else None,
+                        # GTT non trasmette speed: valore reale calcolato dagli spostamenti GPS
+                        "speed": None,
                         "timestamp": v.timestamp or int(time.time()),
-                    })
+                    }
+                    feed_speed = v.position.speed if (v.HasField("position") and v.position.HasField("speed") and v.position.speed > 0) else None
+                    computed = _real_speed(vehicle)
+                    vehicle["speed"] = computed if computed is not None else feed_speed
+                    vehicles.append(vehicle)
 
             if vehicles:
+                # Prune della cache posizioni: conserva solo i mezzi visti in questo ciclo.
+                current_ids = {v["vehicle_id"] for v in vehicles}
+                for stale in list(set(_previous_positions) - current_ids):
+                    _previous_positions.pop(stale, None)
                 last_fetch_source = "live"
-                print(f"✅ [SCRAPER] Feed UFFICIALE GTT attivo: {len(vehicles)} mezzi reali tracciati in tempo reale da {url}.")
+                with_speed = sum(1 for v in vehicles if v.get("speed") is not None)
+                print(f"✅ [SCRAPER] Feed UFFICIALE GTT attivo: {len(vehicles)} mezzi reali tracciati in tempo reale da {url} (velocita' reale calcolata per {with_speed} mezzi).")
                 return vehicles
             print(f"⚠️ [SCRAPER] Feed {url} senza veicoli validi nell'area di Torino.")
 

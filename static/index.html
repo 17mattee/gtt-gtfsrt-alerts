@@ -5,64 +5,88 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GTT Torino Control Room | Live Fleet & Alerts</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background: #0f172a; color: #f8fafc; overflow: hidden; }
-        
-        aside { width: 440px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; z-index: 1000; box-shadow: 5px 0 15px rgba(0,0,0,0.3); }
-        .sidebar-header { padding: 18px; border-bottom: 1px solid #334155; background: #0f172a; }
-        .sidebar-header h1 { font-size: 1.15rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
-        .sidebar-header p { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; }
-        
-        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 15px; background: #1e293b; border-bottom: 1px solid #334155; }
-        .stat-box { background: #0f172a; padding: 10px 6px; border-radius: 8px; border: 1px solid #334155; text-align: center; }
-        .stat-box span { display: block; font-size: 1.3rem; font-weight: 700; color: #38bdf8; }
-        .stat-box.warn span { color: #f59e0b; }
-        .stat-box.danger span { color: #ef4444; }
-        .stat-box label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
+        body { display: flex; height: vh 100; height: 100vh; background: #0b1020; color: #f1f5f9; overflow: hidden; }
 
-        .tabs { display: flex; background: #0f172a; border-bottom: 1px solid #334155; }
-        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: #94a3b8; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
-        .tab-btn.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; background: #1e293b; }
+        aside { width: 460px; background: linear-gradient(180deg, #111827 0%, #0d1425 100%); border-right: 1px solid #1e293b; display: flex; flex-direction: column; z-index: 1000; box-shadow: 6px 0 25px rgba(0,0,0,0.45); }
+        .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid #1e293b; background: radial-gradient(120% 120% at 0% 0%, rgba(56,189,248,0.16) 0%, transparent 55%), #0b1020; }
+        .sidebar-header h1 { font-size: 1.25rem; font-weight: 800; color: #e2e8f0; display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em; }
+        .sidebar-header h1 em { font-style: normal; color: #38bdf8; }
+        .sidebar-header p { font-size: 0.74rem; color: #7d8ba1; margin-top: 5px; font-weight: 500; }
+        .pulse { width: 10px; height: 10px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 0 rgba(34,197,94,0.7); animation: pulse 1.8s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); } 70% { box-shadow: 0 0 0 9px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
 
-        .feed-section { flex: 1; overflow-y: auto; padding: 12px 15px; display: none; }
+        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; padding: 14px 16px; border-bottom: 1px solid #1e293b; }
+        .stat-box { background: linear-gradient(160deg, #16203a 0%, #101728 100%); padding: 11px 6px; border-radius: 10px; border: 1px solid #24304a; text-align: center; transition: transform .15s; }
+        .stat-box:hover { transform: translateY(-2px); }
+        .stat-box span { display: block; font-size: 1.45rem; font-weight: 800; color: #38bdf8; line-height: 1.1; }
+        .stat-box label { font-size: 0.6rem; color: #8b99ad; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+        .stat-box.warn span { color: #fbbf24; }
+        .stat-box.danger span { color: #f87171; }
+        .stat-box.dev span { color: #c084fc; }
+
+        .tabs { display: flex; background: #0b1020; border-bottom: 1px solid #1e293b; }
+        .tab-btn { flex: 1; padding: 12px 4px; background: none; border: none; color: #7d8ba1; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; background: #101728; }
+        .tab-btn:hover { color: #bae6fd; }
+
+        .filter-bar { padding: 10px 14px; border-bottom: 1px solid #1e293b; background: #0e1526; }
+        .filter-bar input { width: 100%; background: #101a2e; border: 1px solid #24304a; color: #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; outline: none; }
+        .filter-bar input:focus { border-color: #38bdf8; }
+        .filter-bar input::placeholder { color: #64748b; }
+
+        .feed-section { flex: 1; overflow-y: auto; padding: 12px 14px; display: none; }
         .feed-section.active { display: block; }
-        
-        .card { background: #334155; border-left: 4px solid #38bdf8; padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 0.85rem; }
-        .card.alert { border-left-color: #f59e0b; }
-        .card.detour { border-left-color: #a855f7; background: linear-gradient(90deg, rgba(168,85,247,0.18), #334155 55%); }
-        .card.delay-ok { border-left-color: #22c55e; }
-        .card.delay-warn { border-left-color: #f59e0b; }
-        .card.delay-high { border-left-color: #ef4444; }
-        .card strong { color: #f8fafc; display: block; margin-bottom: 3px; font-size: 0.88rem; }
-        .card span { color: #94a3b8; font-size: 0.75rem; }
+        .feed-section::-webkit-scrollbar { width: 8px; }
+        .feed-section::-webkit-scrollbar-thumb { background: #24304a; border-radius: 4px; }
 
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; text-transform: uppercase; }
+        .line-group-title { color: #7d8ba1; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 10px 2px 6px; }
+
+        .card { background: #131c31; border: 1px solid #1f2a44; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
+        .card.alert { border-left: 3px solid #fbbf24; }
+        .card.detour { border-left: 3px solid #c084fc; background: linear-gradient(90deg, rgba(168,85,247,0.14), #131c31 50%); }
+        .card.delay-ok { border-left: 3px solid #22c55e; }
+        .card.delay-warn { border-left: 3px solid #fbbf24; }
+        .card.delay-high { border-left: 3px solid #ef4444; }
+        .card strong { color: #e8edf5; display: block; font-size: 0.86rem; font-weight: 600; }
+        .card span { color: #8b99ad; font-size: 0.75rem; }
+
+        .line-badge { min-width: 44px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); box-shadow: inset 0 -2px 0 rgba(0,0,0,0.2); flex-shrink: 0; padding: 0 6px; }
+        .line-badge.metro { background: #f59e0b; }
+        .line-badge.tram { background: #16a34a; }
+        .line-badge.bus { background: #2563eb; }
+        .line-badge.other { background: #64748b; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; text-transform: uppercase; }
         .badge.detour { background: #7e22ce; color: #fff; }
         .badge.delay { background: #b45309; color: #fff; }
         .badge.stop { background: #dc2626; color: #fff; }
         .badge.info { background: #1d4ed8; color: #fff; }
-        .badge.other { background: #475569; color: #e2e8f0; }
 
-        #map { flex: 1; height: 100%; background: #0b0f19; }
+        #map { flex: 1; height: 100%; background: #0b1020; }
 
-        .status-indicator { display: inline-block; width: 8px; height: 8px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; }
-        .connection-status { padding: 11px 15px; font-size: 0.78rem; background: #0f172a; border-top: 1px solid #334155; display: flex; align-items: center; gap: 8px; color: #94a3b8; }
+        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(11,16,32,0.93); border: 1px solid #24304a; border-radius: 10px; padding: 10px 14px; font-size: 0.72rem; color: #a8b3c5; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+        .legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+        .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.85); }
 
-        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(15,23,42,0.92); border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 0.72rem; color: #cbd5e1; }
-        .legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; }
+        .connection-status { padding: 11px 16px; font-size: 0.76rem; background: #0b1020; border-top: 1px solid #1e293b; display: flex; align-items: center; gap: 8px; color: #8b99ad; font-weight: 500; }
+
+        .veh-icon { background: transparent; }
+        .leaflet-popup-content-wrapper { background: #131c31; color: #e8edf5; border-radius: 10px; }
+        .leaflet-popup-tip { background: #131c31; }
+        .leaflet-popup-content b, .leaflet-popup-content strong { color: #38bdf8; }
     </style>
 </head>
 <body>
 
     <aside>
         <div class="sidebar-header">
-            <h1><span class="status-indicator"></span> GTT Torino Control Room</h1>
+            <h1><span class="pulse"></span> GTT Torino <em>Control Room</em></h1>
             <p>GTT GTFS-RT Live Dashboard & Map — Flotta, posizioni GPS, ritardi e allerte live</p>
         </div>
-        
+
         <div class="stats-container">
             <div class="stat-box">
                 <span id="active-vehicles">0</span>
@@ -72,7 +96,7 @@
                 <span id="active-alerts">0</span>
                 <label>Avvisi Attivi</label>
             </div>
-            <div class="stat-box warn">
+            <div class="stat-box dev">
                 <span id="active-detours">0</span>
                 <label>Deviazioni</label>
             </div>
@@ -97,6 +121,9 @@
         </div>
 
         <div id="vehicles-tab" class="feed-section active">
+            <div class="filter-bar">
+                <input id="fleet-filter" type="text" placeholder="Filtra per linea o numero mezzo (es. 4, 15, M1...)" oninput="renderFleetList()">
+            </div>
             <div id="vehicles-list">
                 <div class="card"><strong>Caricamento flotta in corso...</strong><span>Attendere la sincronizzazione GPS con Torino.</span></div>
             </div>
@@ -126,21 +153,25 @@
 
     <div class="legend">
         <div><span class="dot" style="background:#22c55e;"></span> In orario</div>
-        <div><span class="dot" style="background:#f59e0b;"></span> Ritardo 2-5 min</div>
+        <div><span class="dot" style="background:#fbbf24;"></span> Ritardo 2-5 min</div>
         <div><span class="dot" style="background:#ef4444;"></span> Ritardo &gt; 5 min</div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 12);
+        const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([45.0703, 7.6869], 12);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Tile scure stile control room (CARTO, gratis, con attribuzione)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors | GTT Torino'
+            subdomains: 'abcd',
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO | Dati GTT CC BY 4.0'
         }).addTo(map);
 
         let markersLayer = L.layerGroup().addTo(map);
+        let lastData = null;
+        let boundsFitted = false;
 
         function switchTab(tabId, btn) {
             document.querySelectorAll('.feed-section').forEach(el => el.classList.remove('active'));
@@ -156,6 +187,16 @@
                 .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
+        // Badge linea colorato per tipo di mezzo: metro gialla, tram verde, bus blu.
+        function lineBadge(routeId) {
+            const r = String(routeId || '');
+            let cls = 'bus';
+            if (/^m/i.test(r)) cls = 'metro';
+            else if (/^(3|4|9|10|15|16|18|star)/i.test(r)) cls = 'tram';
+            if (!r || r === 'N/A') cls = 'other';
+            return '<span class="line-badge ' + cls + '">' + esc(r || '?') + '</span>';
+        }
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let ws = null;
         let reconnectAttempts = 0;
@@ -165,12 +206,12 @@
 
             ws.onopen = () => {
                 reconnectAttempts = 0;
-                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#22c55e;"></span> Connesso al flusso in tempo reale';
+                document.getElementById('ws-status').innerHTML = '<span class="pulse"></span> Connesso al flusso in tempo reale';
             };
 
             ws.onclose = () => {
                 const delay = Math.min(3000 * (reconnectAttempts + 1), 15000);
-                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#f59e0b;"></span> Riconnessione automatica tra ' + (delay / 1000) + 's...';
+                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#fbbf24;width:8px;height:8px;display:inline-block;border-radius:50%;"></span> Riconnessione automatica tra ' + (delay / 1000) + 's...';
                 reconnectAttempts++;
                 setTimeout(connectWebSocket, delay);
             };
@@ -181,6 +222,7 @@
                 try {
                     const message = JSON.parse(event.data);
                     const data = message.data || message;
+                    lastData = data;
                     updateUI(data);
                 } catch (err) {
                     console.error("Errore WebSocket:", err);
@@ -192,21 +234,28 @@
         function fmtDelay(seconds) {
             if (seconds == null) return 'n/d';
             const min = Math.round(Math.abs(seconds) / 60);
+            if (min < 1) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
-            return min + ' min';
+            return min + ' min di ritardo';
         }
 
         function delayClass(seconds) {
-            if (seconds == null) return 'delay-ok';
-            if (seconds <= 120) return 'delay-ok';
+            if (seconds == null || Math.abs(seconds) < 120) return 'delay-ok';
             if (seconds <= 300) return 'delay-warn';
             return 'delay-high';
         }
 
         function delayColor(seconds) {
-            if (seconds == null || seconds <= 120) return '#22c55e';
-            if (seconds <= 300) return '#f59e0b';
+            if (seconds == null || Math.abs(seconds) < 120) return '#22c55e';
+            if (seconds <= 300) return '#fbbf24';
             return '#ef4444';
+        }
+
+        function fmtSpeed(speedMs) {
+            if (speedMs == null) return 'velocità n/d';
+            const kmh = Number(speedMs) * 3.6;
+            if (kmh < 1) return 'fermo in sosta';
+            return kmh.toFixed(1) + ' km/h';
         }
 
         function categoryBadge(al) {
@@ -221,6 +270,7 @@
         }
 
         function updateUI(data) {
+            lastData = data;
             const vehicles = data.vehicles || [];
             const alerts = data.alerts || [];
             const tripUpdates = data.trip_updates || [];
@@ -231,7 +281,6 @@
             const delaysByTrip = {};
             tripUpdates.forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
 
-            // --- Statistiche generali ---
             const detours = alerts.filter(al => al.category === 'deviazione').length;
             const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds > 120).length;
             const live = meta.vehicles_source === 'live';
@@ -244,58 +293,46 @@
             document.getElementById('active-routes').innerText = Object.keys(routesCatalog).length;
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT');
 
-            document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#22c55e;"></span> ' +
-                (live ? 'Streaming LIVE dai feed ufficiali GTT (' + vehicles.length + ' mezzi reali)' :
+            document.getElementById('ws-status').innerHTML = '<span class="pulse"></span> ' +
+                (live ? 'Streaming LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
                  (simulated ? 'Streaming attivo (modalità smart-fallback GTT)' : 'Streaming attivo'));
 
-            // --- Mappa: marker colorati per stato di ritardo ---
+            // --- Mappa: marker colorati per stato di ritardo, orientati alla direzione reale ---
             markersLayer.clearLayers();
-            const markerFrag = document.createDocumentFragment();
-            const markerHtml = (color) => `<div style="background:${color}; width:13px; height:13px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 6px ${color};"></div>`;
-
+            const bounds = [];
             for (const v of vehicles) {
                 const lat = Number(v.latitude || 0);
                 const lon = Number(v.longitude || 0);
                 if (!lat || !lon) continue;
+                bounds.push([lat, lon]);
 
                 const delay = delaysByTrip[v.trip_id];
                 const color = delayColor(delay);
-                const icon = L.divIcon({ className: 'veh-icon', html: markerHtml(color), iconSize: [13, 13] });
+                const bearing = Number(v.bearing || 0);
+                // Freccia orientata alla direzione reale di marcia sopra un pallino colorato
+                const arrow = bearing
+                    ? `<div style="position:absolute;top:-7px;left:50%;transform:translateX(-50%) rotate(${bearing}deg);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};filter:drop-shadow(0 0 2px rgba(0,0,0,0.8));"></div>`
+                    : '';
+                const dotHtml = `<div style="position:relative;width:13px;height:13px;">${arrow}<div style="width:13px;height:13px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 7px ${color};"></div></div>`;
+                const icon = L.divIcon({ className: 'veh-icon', html: dotHtml, iconSize: [13, 13] });
                 const marker = L.marker([lat, lon], { icon });
                 marker.bindPopup(
-                    '<div style="color:#0f172a;font-family:Inter,sans-serif;">' +
-                    '<strong>Linea ' + esc(v.route_id) + '</strong><br>' +
-                    'ID Mezzo: ' + esc(v.vehicle_id) + '<br>' +
-                    'Velocità: ' + (Number(v.speed || 0) * 3.6).toFixed(1) + ' km/h<br>' +
-                    'Ritardo corsa: ' + fmtDelay(delay) + '<br>' +
-                    'Trip ID: ' + esc(v.trip_id) +
+                    '<div style="min-width:170px;">' +
+                    '<strong>Linea ' + esc(v.route_id) + '</strong> · Mezzo ' + esc(v.vehicle_id) + '<br>' +
+                    fmtSpeed(v.speed) + ' · ' + fmtDelay(delay) + '<br>' +
+                    (routesCatalog[v.route_id] ? '<span style="font-size:0.78rem;color:#8b99ad;">' + esc(routesCatalog[v.route_id]) + '</span><br>' : '') +
+                    '<span style="font-size:0.72rem;color:#8b99ad;">Corsa ' + esc(v.trip_id) + '</span>' +
                     '</div>'
                 );
                 markersLayer.addLayer(marker);
             }
+            if (bounds.length && !boundsFitted) {
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+                boundsFitted = true;
+            }
 
-            // --- Lista flotta (rendering in un'unica operazione DOM) ---
-            const vehList = vehicles.slice(0, 120).map(v => {
-                const delay = delaysByTrip[v.trip_id];
-                return `<div class="card ${delayClass(delay)}">
-                    <strong>Linea ${esc(v.route_id)} — Mezzo #${esc(v.vehicle_id)}</strong>
-                    <span>Vel: ${(Number(v.speed || 0) * 3.6).toFixed(1)} km/h · Ritardo: ${fmtDelay(delay)}</span>
-                </div>`;
-            }).join('');
-            document.getElementById('vehicles-list').innerHTML = vehList ||
-                '<div class="card"><strong>Nessun veicolo attivo</strong><span>Impossibile recuperare posizioni al momento.</span></div>';
-
-            // --- Lista ritardi: prima le peggiori, solo corse con dato di ritardo ---
-            const withDelay = tripUpdates.filter(tu => tu.delay_seconds != null)
-                .sort((a, b) => b.delay_seconds - a.delay_seconds);
-            document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 120).map(tu => {
-                const d = tu.delay_seconds;
-                return `<div class="card ${delayClass(d)}">
-                    <strong>Linea ${esc(tu.route_id)} — Corsa ${esc(tu.trip_id)}</strong>
-                    <span>Ritardo: ${fmtDelay(d)}${tu.vehicle_id ? ' · Mezzo #' + esc(tu.vehicle_id) : ''}</span>
-                </div>`;
-            }).join('') :
-                '<div class="card delay-ok"><strong>Nessun ritardo segnalato</strong><span>Le corse monitorate rispettano gli orari ufficiali GTT.</span></div>';
+            renderFleetList();
+            renderDelaysList(tripUpdates, delaysByTrip);
 
             // --- Avvisi: DEVIAZIONI PRIMA, spiegazione massimamente chiara ---
             const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
@@ -309,17 +346,86 @@
                 const causeTxt = al.cause_label || '';
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
                 if (isDetour) {
-                    line += `<strong>DEVIATIONE DI PERCORSO — Linea ${esc(routes || 'rete')}</strong>
-                             <span style="display:block;color:#e9d5ff;font-weight:600;margin:2px 0;">Il percorso della linea e' MODIFICATO: il mezzo segue un itinerario alternativo. ${esc(effectTxt)}</span>`;
+                    line += `<div><strong>DEVIATIONE — Linea ${esc(routes || 'rete')}</strong>
+                             <span style="display:block;color:#e9d5ff;font-weight:600;margin-top:2px;">Percorso modificato: itinerario alternativo. ${esc(effectTxt)}</span></div>`;
                 } else {
-                    line += `<strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>`;
+                    line += `<div><strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>
+                             <span style="display:block;margin-top:2px;">${esc(al.header)}</span></div>`;
                 }
-                line += `<span style="display:block;">${esc(al.header)}</span>`;
-                if (al.description) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
-                line += `<span style="display:block;margin-top:3px;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span></div>`;
+                if (al.description && !isDetour) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
+                line += `<span style="display:block;margin-top:3px;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span>`;
+                line += '</div>';
                 return line;
             }).join('') :
                 '<div class="card alert"><strong>Nessuna interruzione critica</strong><span>La rete GTT risulta regolare su tutte le linee urbane e metropolitane.</span></div>';
+        }
+
+        function renderFleetList() {
+            if (!lastData) return;
+            const vehicles = lastData.vehicles || [];
+            const routesCatalog = lastData.routes_catalog || {};
+            const delaysByTrip = {};
+            (lastData.trip_updates || []).forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
+
+            const query = (document.getElementById('fleet-filter').value || '').trim().toLowerCase();
+            const filtered = vehicles.filter(v => {
+                if (!query) return true;
+                return String(v.route_id).toLowerCase().includes(query) ||
+                       String(v.vehicle_id).toLowerCase().includes(query);
+            });
+
+            // Raggruppamento per linea, ordinato: panoramica pulita della rete.
+            const byRoute = {};
+            filtered.forEach(v => {
+                const key = v.route_id || 'N/A';
+                (byRoute[key] = byRoute[key] || []).push(v);
+            });
+            const routeKeys = Object.keys(byRoute).sort((a, b) => {
+                const na = parseFloat(a), nb = parseFloat(b);
+                if (isNaN(na) && isNaN(nb)) return a.localeCompare(b);
+                if (isNaN(na)) return 1;
+                if (isNaN(nb)) return -1;
+                return na - nb;
+            });
+
+            let html = '';
+            let shown = 0;
+            for (const key of routeKeys) {
+                if (shown >= 150) break;
+                const group = byRoute[key];
+                const longName = routesCatalog[key];
+                html += `<div class="line-group-title">Linea ${esc(key)}${longName ? ' — ' + esc(longName) : ''} · ${group.length} mezzi</div>`;
+                for (const v of group) {
+                    if (shown >= 150) { html += '<div class="card"><span>…altri mezzi nascosti, usa il filtro per affinare</span></div>'; break; }
+                    shown++;
+                    const delay = delaysByTrip[v.trip_id];
+                    html += `<div class="card ${delayClass(delay)}">
+                        ${lineBadge(key)}
+                        <div style="flex:1;">
+                            <strong>Mezzo ${esc(v.vehicle_id)}</strong>
+                            <span>${fmtSpeed(v.speed)} · ${fmtDelay(delay)}</span>
+                        </div>
+                    </div>`;
+                }
+            }
+            document.getElementById('vehicles-list').innerHTML = html ||
+                '<div class="card"><strong>Nessun veicolo trovato</strong><span>Nessun mezzo corrisponde al filtro o il feed non è raggiungibile.</span></div>';
+        }
+
+        function renderDelaysList(tripUpdates) {
+            const withDelay = tripUpdates.filter(tu => tu.delay_seconds != null)
+                .sort((a, b) => b.delay_seconds - a.delay_seconds);
+            document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 150).map(tu => {
+                const d = tu.delay_seconds;
+                return `<div class="card ${delayClass(d)}">
+                    ${lineBadge(tu.route_id)}
+                    <div style="flex:1;">
+                        <strong>Corsa ${esc(tu.trip_id)}${tu.vehicle_id ? ' · Mezzo ' + esc(tu.vehicle_id) : ''}</strong>
+                        <span>${fmtDelay(d)}</span>
+                    </div>
+                </div>`;
+            }).join('') :
+                '<div class="card delay-ok"><strong>Nessun ritardo segnalato</strong><span>Le corse monitorate rispettano gli orari ufficiali GTT.</span></div>';
         }
     </script>
 </body>
