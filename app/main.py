@@ -86,6 +86,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 @limiter.limit("30/minute")
 def dashboard(request: Request):
     current_alerts = get_cached_alerts()
+    count = len(current_alerts)
     html = f"""<!DOCTYPE html>
 <html lang="it">
 <head>
@@ -108,13 +109,13 @@ h1 {{ color: #38bdf8; }}
 <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb">/gtfs-rt/alerts.pb</a></div>
 <div class="endpoint">GET <a href="/health">/health</a></div>
 <div class="endpoint">GET <a href="/metrics">/metrics</a></div>
-<p>Avvisi attivi in cache: <strong>{{len(current_alerts)}}</strong></p>
+<p>Avvisi attivi in cache: <strong>{count}</strong></p>
 <div id="map"></div>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 var map = L.map("map").setView([45.0703, 7.6869], 13);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {{ maxZoom: 19 }}).addTo(map);
+L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{ maxZoom: 19 }}).addTo(map);
 L.marker([45.0703, 7.6869]).addTo(map).bindPopup("<b>GTT Torino Hub Centrale</b>").openPopup();
 </script>
 </body>
@@ -123,7 +124,35 @@ L.marker([45.0703, 7.6869]).addTo(map).bindPopup("<b>GTT Torino Hub Centrale</b>
 
 @app.get("/health")
 def health_check():
-    return JSONResponse(status_code=200, content={"status": "healthy", "cached_alerts": len(get_cached_alerts()), "timestamp": int(time.time())})
+    db_status = "disconnected"
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            with psycopg.connect(database_url, connect_timeout=2) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            db_status = "connected"
+        except Exception:
+            db_status = "error"
+
+    redis_status = "disabled"
+    if redis_client:
+        try:
+            redis_client.ping()
+            redis_status = "connected"
+        except Exception:
+            redis_status = "error"
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "healthy",
+            "database": db_status,
+            "redis": redis_status,
+            "cached_alerts": len(get_cached_alerts()),
+            "timestamp": int(time.time())
+        }
+    )
 
 @app.get("/gtfs-rt/alerts.pb")
 @limiter.limit("60/minute")

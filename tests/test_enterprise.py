@@ -1,7 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app.scraper import parse_cause, parse_effect
 from google.transit import gtfs_realtime_pb2
 import os
 import docker
@@ -19,7 +18,7 @@ def is_docker_available():
 def test_api_root_dashboard():
     response = client.get("/")
     assert response.status_code == 200
-    assert "GTT GTFS-RT Dashboard" in response.text
+    assert "GTT GTFS-RT Live Dashboard & Map" in response.text
 
 def test_gtfs_rt_protobuf_endpoint():
     response = client.get("/gtfs-rt/alerts.pb")
