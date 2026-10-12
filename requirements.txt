@@ -16,3 +16,5 @@ redis==5.2.0
 pybreaker==1.2.0
 prometheus-fastapi-instrumentator==7.1.0
 pybreaker==1.2.0
+testcontainers[postgres,redis]==4.9.0
+testcontainers[postgres,redis]==4.9.0
