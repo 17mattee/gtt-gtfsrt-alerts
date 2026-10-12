@@ -279,6 +279,9 @@ async def fetch_gtt_rt_alerts() -> list:
                 "end_time": alert.active_period[0].end if alert.active_period and alert.active_period[0].end else None,
                 "timestamp": feed.header.timestamp or int(time.time()),
             })
+        # Difensivo: se il feed pubblicasse alert_id duplicati, si deduplica.
+        seen_ids = set()
+        alerts = [a for a in alerts if not (a["alert_id"] in seen_ids or seen_ids.add(a["alert_id"]))]
         last_alerts_source = "live"
         _alerts_cache["data"] = alerts
         _alerts_cache["fetched_at"] = time.time()

@@ -105,7 +105,7 @@ async def save_network_data_to_db(data: dict):
         try:
             rows = []
             for al in alerts:
-                alert_id = al.get("alert_id") or f"{al.get('header', 'avviso')[:60]}"
+                alert_id = al.get("alert_id") or str(al.get("header") or "avviso")[:60]
                 start_time = al.get("start_time")
                 rows.append({
                     "alert_id": str(alert_id),

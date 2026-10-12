@@ -415,7 +415,9 @@
 
         function fmtDelay(seconds) {
             if (seconds == null) seconds = 0;
-            const min = Math.round(Math.abs(seconds) / 60);
+            // floor (non round): il testo resta coerente col colore del marker
+            // (verde fino a 2 min, ambra 2-5, rosso oltre).
+            const min = Math.floor(Math.abs(seconds) / 60);
             if (min < 1) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
             return min + ' min di ritardo';

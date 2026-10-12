@@ -33,6 +33,8 @@ FALLBACK_ROUTES = {
     "M1": "Metropolitana - Fermi / Bengasi",
     "3": "Tram - Corso Tortona / Vallette",
     "4": "Tram - Strada Cattane / Drosso",
+    "6": "Bus - Piazza Hermada / Piazza Carlo Felice",
+    "7": "Tram Storici - Circolare Piazza Castello / Porta Nuova",
     "9": "Tram - Piazza Stampalia / Torino Esposizioni",
     "10": "Tram - Piazza Statuto / Vallette",
     "15": "Tram - Sassi / Via Senatore Ghedini",

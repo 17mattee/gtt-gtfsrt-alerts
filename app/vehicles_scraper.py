@@ -142,6 +142,15 @@ async def fetch_gtt_vehicle_positions() -> list:
                     vehicle["speed"] = computed if computed is not None else feed_speed
                     vehicles.append(vehicle)
 
+            # Difensivo: se il feed pubblicasse lo stesso mezzo due volte, si deduplica.
+            seen_ids = set()
+            deduped = []
+            for v in vehicles:
+                if v["vehicle_id"] not in seen_ids:
+                    seen_ids.add(v["vehicle_id"])
+                    deduped.append(v)
+            vehicles = deduped
+
             # Feed raggiunto: mostra ESATTAMENTE quello che GTT pubblica,
             # anche se in questo momento sono pochissimi mezzi.
             last_fetch_source = "live"
