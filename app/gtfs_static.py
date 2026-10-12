@@ -116,6 +116,7 @@ class GtfsStaticManager:
         self._route_colors: dict = {}  # short_name -> "#RRGGBB" (colori ufficiali GTT)
         self._route_text_colors: dict = {}  # short_name -> "#RRGGBB"
         self._stops_cache: dict = {}    # stop_id -> {"name", "lat", "lon"} (fermate reali)
+        self._trip_headsigns: dict = {} # trip_id -> capolinea di destinazione (trips.txt)
         self._zip_bytes: bytes = b""    # pacchetto GTFS-Static in cache (per stop_times)
         self._trip_sequences: dict = {} # trip_id -> [(secondi_dalla_mezzanotte, stop_id), ...]
         self._cache_loaded_at: float = 0.0
@@ -202,6 +203,12 @@ class GtfsStaticManager:
         """Sequenze fermate per corsa: trip_id -> [(secondi, stop_id), ...]."""
         return self._trip_sequences
 
+    def get_trip_headsigns(self) -> dict:
+        """Capolinea di destinazione per corsa: trip_id -> headsign (trips.txt GTT)."""
+        if self._is_cache_fresh() and self._trip_headsigns:
+            return self._trip_headsigns
+        return {}
+
     def refresh_trip_sequences(self, trip_ids) -> int:
         """Costruisce/aggiorna le sequenze fermate SOLO per le corse richieste.
 
@@ -267,6 +274,7 @@ class GtfsStaticManager:
                 self._route_colors = routes.get("route_colors", {})
                 self._route_text_colors = routes.get("route_text_colors", {})
                 self._stops_cache = routes.get("stops", {})
+                self._trip_headsigns = routes.get("trip_headsigns", {})
                 self._zip_bytes = routes.get("zip_bytes", b"")
                 self._cache_loaded_at = time.time()
                 self._cache_source = "gtfs-static-ufficiale"
@@ -297,6 +305,19 @@ class GtfsStaticManager:
                         print(f"⚠️ [CATALOGO] routes.txt assente nel pacchetto di {url}.")
                         continue
                     content = z.read("routes.txt").decode("utf-8-sig")
+                    # Capolinea di destinazione per ogni corsa (trips.txt):
+                    # e' la vera indicazione di direzione verso il terminale.
+                    trip_headsigns = {}
+                    if "trips.txt" in z.namelist():
+                        try:
+                            trips_content = z.read("trips.txt").decode("utf-8-sig")
+                            for trow in csv.DictReader(trips_content.splitlines()):
+                                tid = (trow.get("trip_id") or "").strip()
+                                headsign = (trow.get("trip_headsign") or "").strip()
+                                if tid and headsign:
+                                    trip_headsigns[tid] = headsign
+                        except Exception as exc:
+                            logger.warning("trips.txt non leggibile (%s): capolinei non disponibili.", exc)
                     stops = {}
                     if "stops.txt" in z.namelist():
                         try:
@@ -346,6 +367,7 @@ class GtfsStaticManager:
                         "route_colors": route_colors,
                         "route_text_colors": route_text_colors,
                         "stops": stops,
+                        "trip_headsigns": trip_headsigns,
                         "zip_bytes": response.content,
                     }
             except Exception as exc:

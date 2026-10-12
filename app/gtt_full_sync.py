@@ -186,6 +186,7 @@ async def fetch_all_gtt_data() -> dict:
             updates_by_vehicle[tu["vehicle_id"]].append(tu)
     delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
     stops_catalog = gtfs_manager.get_stops()
+    headsigns = gtfs_manager.get_trip_headsigns()
     from app.vehicles_scraper import _haversine_meters
 
     # Fermate programmate per corsa (stop_times GTFS-Static): il feed RT di GTT
@@ -223,6 +224,14 @@ async def fetch_all_gtt_data() -> dict:
         else:
             # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
             v["delay_seconds"] = 0
+
+        # CAPOLINEA DI DESTINAZIONE (trips.txt GTT): la vera direzione del
+        # mezzo, per ogni mezzo. Si preferisce la corsa del trip update scelto
+        # (il trip_id del feed posizioni puo' essere vuoto o sfasato).
+        v["headsign"] = (
+            headsigns.get((chosen or {}).get("trip_id"))
+            or headsigns.get(v.get("trip_id"))
+        )
 
         # PRECISIONE D'ARRIVO: prossima fermata con nome reale (GTFS-Static) e
         # minuti all'arrivo previsti da GTT. Con verifica di coerenza: se il GPS
@@ -287,6 +296,12 @@ async def fetch_all_gtt_data() -> dict:
         print("📢 [SYNC] FASE 3 FALLBACK -> Nessun avviso pubblico: mostro stato di regolarità di rete.")
 
     result["alerts"] = alerts
+
+    # Capolinea di destinazione anche sulle corse (per la lista ritardi).
+    headsigns_all = gtfs_manager.get_trip_headsigns()
+    for tu in trip_updates:
+        if tu.get("trip_id") and not tu.get("headsign"):
+            tu["headsign"] = headsigns_all.get(tu["trip_id"])
 
     # Tipi e colori UFFICIALI delle linee (dal GTFS-Static): la UI non deve
     # indovinare quale linea sia tram o bus, usa il dato reale.

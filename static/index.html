@@ -397,7 +397,11 @@
             html += '<div class="popup-route">' + lineBadge(v.route_id) + ' ' + esc(fmtVehicleType(v.route_id)) + ' ' + esc(v.vehicle_id) + '</div>';
             if (routesCatalog[v.route_id]) html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + esc(routesCatalog[v.route_id]) + '</div>';
             html += '<div class="popup-big-delay" style="color:' + delayColor(delay) + ';">' + fmtDelay(delay) + '</div>';
-            html += '<div class="popup-row">' + fmtSpeed(v.speed) + ' · direzione ' + fmtDirection(v.bearing) + '</div>';
+            html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' +
+                (v.headsign
+                    ? 'Direzione: ' + esc(v.headsign) + (v.bearing ? ' <span style="color:#8a8a86;font-weight:500;">(verso ' + fmtDirection(v.bearing).toLowerCase() + ')</span>' : '')
+                    : 'direzione ' + fmtDirection(v.bearing)) + '</div>';
+            html += '<div class="popup-row">' + fmtSpeed(v.speed) + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
             if (v.next_stop) {
                 html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + ' · tra ' + v.next_stop.minutes + ' min</div>';
@@ -589,7 +593,7 @@
                     shown++;
                     const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
-                        <div style="flex:1;"><strong>Mezzo ${esc(v.vehicle_id)}</strong></div>
+                        <div style="flex:1;min-width:0;"><strong>Mezzo ${esc(v.vehicle_id)}${v.headsign ? ' → ' + esc(v.headsign) : ''}</strong></div>
                         <span style="white-space:nowrap;">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${gpsStale ? ' · GPS datato' : ''}</span>
                     </div>`;
                 }
@@ -606,7 +610,7 @@
                 return `<div class="card ${delayClass(d)}" data-vehicle="${esc(tu.vehicle_id || '')}">
                     ${lineBadge(tu.route_id)}
                     <div style="flex:1;">
-                        <strong>Corsa ${esc(tu.trip_id)}</strong>
+                        <strong>Corsa ${esc(tu.trip_id)}${tu.headsign ? ' → ' + esc(tu.headsign) : ''}</strong>
                         <span>${fmtDelay(d)}${tu.vehicle_id ? ' · Mezzo ' + esc(tu.vehicle_id) : ''}</span>
                     </div>
                 </div>`;
