@@ -5,7 +5,9 @@ def test_parse_cause_logic():
     assert parse_cause("Avviso di sciopero generale") == gtfs_realtime_pb2.Alert.Cause.STRIKE
     assert parse_cause("Lavori in corso sulla linea") == gtfs_realtime_pb2.Alert.Cause.CONSTRUCTION
     assert parse_cause("Corteo in centro") == gtfs_realtime_pb2.Alert.Cause.DEMONSTRATION
-    assert parse_cause("Evento sconosciuto") == gtfs_realtime_pb2.Alert.Cause.UNKNOWN_CAUSE
+    assert parse_cause("Manifestazione in centro") == gtfs_realtime_pb2.Alert.Cause.DEMONSTRATION
+    assert parse_cause("Concerto straordinario allo stadio") == gtfs_realtime_pb2.Alert.Cause.OTHER_CAUSE
+    assert parse_cause("Test generico sconosciuto") == gtfs_realtime_pb2.Alert.Cause.UNKNOWN_CAUSE
 
 def test_parse_effect_logic():
     assert parse_effect("La linea 4 è deviata") == gtfs_realtime_pb2.Alert.Effect.DETOUR
