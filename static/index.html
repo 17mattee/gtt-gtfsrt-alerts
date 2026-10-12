@@ -80,6 +80,14 @@
         .alert-type.info { background: #2563eb; color: #fff; }
         .alert-lines { margin: 4px 0 2px; }
         .alert-meta { margin-top: 6px; font-size: 0.72rem; color: var(--text-3); }
+        .detour-period { display: inline-block; background: var(--soft); border: 1px solid var(--border); border-radius: 5px; padding: 2px 8px; font-size: 0.7rem; font-weight: 600; color: var(--text-2); margin: 4px 0; }
+        .detour-dir { margin-top: 7px; }
+        .detour-dir .dir-name { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #7c3aed; margin-bottom: 3px; }
+        .street-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+        .street-chip { background: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 0.72rem; color: var(--text); font-weight: 500; }
+        .street-chip.start { background: #f5f0ff; border-color: #d8c7f5; color: #5b21b6; font-weight: 600; }
+        .street-chip.back { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+        .street-arrow { color: var(--text-3); font-size: 0.7rem; }
         .card.d-ok { border-left: 3px solid var(--ok); }
         .card.d-warn { border-left: 3px solid var(--warn); }
         .card.d-late { border-left: 3px solid var(--late); }
@@ -510,14 +518,38 @@
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
                 line += `<span class="alert-type ${badge[0]}">${badge[1]}</span>`;
                 if (isDetour) {
-                    line += `<strong style="color:#1a1a1a;">Il percorso di queste linee è MODIFICATO</strong>
-                             <span style="display:block;color:#7c3aed;font-weight:600;margin-top:2px;">I mezzi seguono un itinerario alternativo: le fermate abituali potrebbero non essere servite.</span>`;
+                    line += `<strong style="color:#1a1a1a;">Percorso modificato</strong>`;
                 } else {
                     line += `<strong style="color:#1a1a1a;">${esc(al.header)}</strong>`;
                 }
                 line += lineBadges;
-                if (al.description && !isDetour) line += `<span style="display:block;margin-top:4px;">${esc(al.description)}</span>`;
-                line += `<div class="alert-meta">Motivo: ${esc(causeTxt) || 'non specificato'} · Effetto: ${esc(effectTxt) || 'non specificato'}</div></div>`;
+                // Deviazione ELABORATA dal testo GTT: periodo, itinerario via per via, motivo.
+                const dt = al.detour;
+                if (isDetour && dt) {
+                    if (dt.periodo) line += `<div class="detour-period">📅 ${esc(dt.periodo)}</div>`;
+                    const flow = (from, streets, back) => {
+                        let h = '<div class="street-flow">';
+                        if (from) h += `<span class="street-chip start">da ${esc(from)}</span><span class="street-arrow">→</span>`;
+                        h += streets.map(s => `<span class="street-chip">${esc(s)}</span>`).join('<span class="street-arrow">→</span>');
+                        if (back) h += `<span class="street-arrow">⟳</span><span class="street-chip back">ritorna sul percorso regolare</span>`;
+                        return h + '</div>';
+                    };
+                    if (dt.direzioni && dt.direzioni.length) {
+                        dt.direzioni.forEach(dir => {
+                            line += `<div class="detour-dir"><div class="dir-name">Direzione ${esc(dir.nome || '—')}</div>${flow(dir.da, dir.strade, dir.ritorno)}</div>`;
+                        });
+                    } else if (dt.itinerario && dt.itinerario.strade && dt.itinerario.strade.length) {
+                        const dirName = dt.itinerario.nome ? `Direzione ${esc(dt.itinerario.nome)}` : 'Itinerario deviato';
+                        line += `<div class="detour-dir"><div class="dir-name">${dirName}</div>${flow(dt.itinerario.da, dt.itinerario.strade, dt.itinerario.ritorno)}</div>`;
+                    } else if (al.description) {
+                        line += `<span style="display:block;margin-top:4px;">${esc(al.description)}</span>`;
+                    }
+                    if (dt.fonte_esterna) line += `<span style="display:block;margin-top:3px;color:var(--text-3);font-size:0.72rem;">GTT rimanda all'itinerario completo sul proprio sito.</span>`;
+                } else if (al.description) {
+                    line += `<span style="display:block;margin-top:4px;">${esc(al.description)}</span>`;
+                }
+                const motivo = (isDetour && dt && dt.motivo) ? dt.motivo.replace(/^Causa\s+/i, '') : causeTxt;
+                line += `<div class="alert-meta">Motivo: ${esc(motivo) || 'non specificato'}${effectTxt ? ' · Effetto: ' + esc(effectTxt) : ''}</div></div>`;
                 return line;
             }).join('') :
                 '<div class="card alert"><strong>Nessuna interruzione critica</strong><span>La rete GTT risulta regolare su tutte le linee urbane e metropolitane.</span></div>';

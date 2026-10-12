@@ -110,6 +110,103 @@ def _classify_alert(cause: int, effect: int) -> str:
     return "informazione"
 
 
+# ----------------------------------------------------------------------------
+# ELABORAZIONE DEVIAZIONI: dai testi GTT (via per via) a dati strutturati.
+# Esempio GTT: "Direzione via Ventimiglia: da corso Sebastopoli angolo via
+# Tripoli devia per corso IV Novembre, via Sacchi, percorso regolare;"
+# ----------------------------------------------------------------------------
+
+_WEEKDAY_OR_MONTH = (
+    r"(?:lunedi|martedi|mercoledi|giovedi|venerdi|sabato|domenica|gennaio|"
+    r"febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|"
+    r"novembre|dicembre)"
+)
+
+
+def _parse_itinerary(body: str) -> dict:
+    """Estrae punto di deviazione, elenco delle vie e ritorno al percorso regolare."""
+    da, streets_txt = None, None
+    m = re.search(r"^(?:da\s+)?(.+?)\s+(?:devia|prosegue)\s+(?:per|attraverso)\s+(.+)$", body, re.IGNORECASE | re.DOTALL)
+    if m:
+        da, streets_txt = m.group(1).strip(), m.group(2)
+    else:
+        m2 = re.search(r"^(?:da\s+)?(.+?)\s+per\s+(.+)$", body, re.IGNORECASE | re.DOTALL)
+        if m2:
+            da, streets_txt = m2.group(1).strip(), m2.group(2)
+    if not streets_txt:
+        return {"da": None, "strade": [], "ritorno": False}
+    ritorno = "percorso regolare" in streets_txt.lower()
+    streets_txt = re.sub(r",?\s*percorso regolare.*$", "", streets_txt, flags=re.IGNORECASE).strip(" .,")
+    strade = [s.strip(" .") for s in streets_txt.split(",") if s.strip(" .")]
+    return {"da": da, "strade": strade, "ritorno": ritorno}
+
+
+def _parse_detour_details(header: str, description: str):
+    """Elabora il testo di una deviazione GTT in dati strutturati.
+
+    Estrae: periodo, motivo, e per OGNI direzione il punto in cui il mezzo
+    lascia il percorso e le vie che percorre una per una (dal testo GTT,
+    senza inventare nulla). Restituisce None se non c'e' nulla da strutturare.
+    """
+    text = (description or "").strip()
+    if not text:
+        return None
+    out = {"periodo": None, "motivo": None, "direzioni": [], "itinerario": None, "fonte_esterna": False}
+    try:
+        # Nome della direzione dichiarata nel titolo (es. "deviata in direzione Sassi")
+        header_dir = None
+        mh = re.search(r"deviat[ae]\s+(?:in\s+)?direzione\s+(.+?)\s*$", header or "", re.IGNORECASE)
+        if mh:
+            header_dir = mh.group(1).strip().rstrip(".,;")
+
+        for seg in re.split(r"[\n;]+", text):
+            seg = seg.strip()
+            if not seg:
+                continue
+            low = seg.lower()
+
+            # Periodo: segmento con data/ora ("Martedi' 13 ottobre 2026 dalle ore 7.00 alle 20.00 circa")
+            if out["periodo"] is None and re.search(_WEEKDAY_OR_MONTH, low) and re.search(r"\d{1,2}", seg) and "direzione" not in low[:12]:
+                out["periodo"] = seg.rstrip(".,;")
+                continue
+
+            # Direzione esplicita: "Direzione X: <itinerario>"
+            if low.startswith("direzione") and ":" in seg:
+                name, body = seg.split(":", 1)
+                itinerary = _parse_itinerary(body)
+                out["direzioni"].append({
+                    "nome": name.replace("Direzione", "").strip(),
+                    **itinerary,
+                })
+                continue
+
+            # Motivo: causa / lavori / impedimento
+            if out["motivo"] is None and (low.startswith("causa") or low.startswith("lavori") or " causa " in low[:30]):
+                out["motivo"] = seg.rstrip(".,;")
+                continue
+
+            # Itinerario senza direzione esplicita (mono-direzionale)
+            if out["itinerario"] is None and re.search(r"\b(devia|prosegue|per)\b", low) and ("percorso" in low or "via" in low or "corso" in low or "piazza" in low):
+                itinerary = _parse_itinerary(seg)
+                if itinerary["strade"]:
+                    itinerary["nome"] = header_dir
+                    out["itinerario"] = itinerary
+                continue
+
+            if "www.gtt" in low or "consulta" in low:
+                out["fonte_esterna"] = True
+
+        # se c'e' una sola direzione e l'itinerario e' vuoto, riusa l'itinerario singolo
+        if out["direzioni"] and not out["itinerario"] and header_dir and len(out["direzioni"]) == 1:
+            pass
+    except Exception as exc:
+        logger.warning("Elaborazione deviazione fallita (%s): testo grezzo mantenuto.", exc)
+        return None
+    if not (out["periodo"] or out["motivo"] or out["direzioni"] or out["itinerario"]):
+        return None
+    return out
+
+
 def _extract_routes_from_text(text: str, max_routes: int = 12) -> list:
     """Estrae le linee citate in un testo ("Linee 39, 1N deviate...").
 
@@ -278,10 +375,12 @@ async def fetch_gtt_rt_alerts() -> list:
                 affected = _extract_routes_from_text(header + " " + description)
             cause = int(alert.cause) if alert.cause else 1
             effect = int(alert.effect) if alert.effect else 8
+            detour = _parse_detour_details(header, description) if _classify_alert(cause, effect) == "deviazione" else None
             alerts.append({
                 "alert_id": entity.id or f"gtt-rt-alert-{len(alerts)}",
                 "header": header,
                 "description": description,
+                "detour": detour,
                 "affected_routes": affected,
                 "cause": cause,
                 "effect": effect,
