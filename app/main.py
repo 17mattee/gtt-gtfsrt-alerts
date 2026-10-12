@@ -180,3 +180,25 @@ def get_gtfs_rt_alerts(request: Request):
         dt.text = item["description"]
         dt.language = "it"
     return Response(content=feed.SerializeToString(), media_type="application/x-protobuf")
+
+@app.websocket("/ws/control-room")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        # Invio immediato garantito (dati di flotta Torino)
+        vehicles = [
+            {"vehicle_id": "GTT-Tram-3", "trip_id": "trip_01", "route_id": "3", "latitude": 45.0703, "longitude": 7.6869, "bearing": 90.0, "speed": 15.0, "timestamp": 1718000000},
+            {"vehicle_id": "GTT-Bus-4", "trip_id": "trip_02", "route_id": "4", "latitude": 45.0650, "longitude": 7.6800, "bearing": 180.0, "speed": 22.0, "timestamp": 1718000000},
+            {"vehicle_id": "GTT-Bus-58", "trip_id": "trip_03", "route_id": "58/", "latitude": 45.0750, "longitude": 7.6600, "bearing": 45.0, "speed": 18.0, "timestamp": 1718000000}
+        ]
+        await websocket.send_json({"type": "full_network_update", "data": full_data})
+
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "full_network_update", "data": full_data})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        manager.disconnect(websocket)
