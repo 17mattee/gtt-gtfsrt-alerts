@@ -9,6 +9,7 @@ Garanzie:
 """
 
 import asyncio
+import re
 import logging
 import time
 
@@ -187,7 +188,25 @@ async def fetch_all_gtt_data() -> dict:
     delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
     stops_catalog = gtfs_manager.get_stops()
     headsigns = gtfs_manager.get_trip_headsigns()
+    trip_routes = gtfs_manager.get_trip_routes()
     from app.vehicles_scraper import _haversine_meters
+
+    def _terminus_name(stop_id):
+        """Nome pulito del capolinea: 'Fermata 163 - CORRADINO CAP' -> 'CORRADINO CAP'."""
+        name = (stops_catalog.get(stop_id) or {}).get("name") or ""
+        m = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", name)
+        return (m.group(1).strip() if m else name).strip()
+
+    def _headsign_valido(trip_id, vehicle_route_id):
+        """Headsign di trips.txt, usato SOLO se la corsa appartiene alla stessa
+        linea del mezzo (protegge da scambi di corsa) e solo come fallback:
+        per alcune corse varianti GTT pubblica l'origine, non la destinazione."""
+        if not trip_id or trip_id not in headsigns:
+            return None
+        corsa_route = gtfs_manager.get_route_short_name(trip_routes.get(trip_id) or "")
+        if vehicle_route_id and corsa_route and corsa_route != vehicle_route_id:
+            return None
+        return headsigns[trip_id]
 
     # Fermate programmate per corsa (stop_times GTFS-Static): il feed RT di GTT
     # non pubblica gli stop_id, servono per risalire al nome della prossima
@@ -199,12 +218,13 @@ async def fetch_all_gtt_data() -> dict:
     active_trips = {v.get("trip_id") for v in vehicles if v.get("trip_id")}
     active_trips |= {tu.get("trip_id") for tu in trip_updates if tu.get("trip_id")}
     missing = [t for t in active_trips if t not in trip_sequences]
-    if missing and (time.time() - _last_sequence_refresh) > SEQUENCE_REFRESH_INTERVAL:
+    broken = [t for t in active_trips if t in trip_sequences and len(trip_sequences[t]) < 2]
+    if (missing or broken) and (time.time() - _last_sequence_refresh) > SEQUENCE_REFRESH_INTERVAL:
         _last_sequence_refresh = time.time()
         try:
             await asyncio.to_thread(gtfs_manager.refresh_trip_sequences, active_trips)
             trip_sequences = gtfs_manager.get_trip_sequences()
-            print(f"📍 [SYNC] Fermate programmate caricate dal GTFS-Static per {len(missing)} nuove corse.")
+            print(f"📍 [SYNC] Fermate programmate caricate dal GTFS-Static: {len(missing)} nuove corse, {len(broken)} sequenze riparate.")
         except Exception as exc:
             logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
 
@@ -225,13 +245,28 @@ async def fetch_all_gtt_data() -> dict:
             # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
             v["delay_seconds"] = 0
 
-        # CAPOLINEA DI DESTINAZIONE (trips.txt GTT): la vera direzione del
-        # mezzo, per ogni mezzo. Si preferisce la corsa del trip update scelto
-        # (il trip_id del feed posizioni puo' essere vuoto o sfasato).
-        v["headsign"] = (
-            headsigns.get((chosen or {}).get("trip_id"))
-            or headsigns.get(v.get("trip_id"))
-        )
+        # CAPOLINEA DI DESTINAZIONE: la fonte piu' affidabile e' l'ULTIMA
+        # fermata della sequenza della corsa (stop_times GTFS-Static). Per
+        # alcune corse varianti GTT pubblica l'origine come headsign (verificato
+        # su dati reali): es. corsa 2U con headsign 'MONGINEVRO' che in realta'
+        # termina a CORRADINO CAP. L'headsign resta solo come fallback, e solo
+        # se la corsa appartiene alla stessa linea del mezzo.
+        v_route = v.get("route_id")
+        chosen_tid = (chosen or {}).get("trip_id")
+        own_tid = v.get("trip_id")
+        v["headsign"] = None
+        for tid in (chosen_tid, own_tid):
+            if not tid:
+                continue
+            seq = trip_sequences.get(tid)
+            if seq:
+                v["headsign"] = _terminus_name(seq[-1][1])
+                if v["headsign"]:
+                    break
+            fallback_hs = _headsign_valido(tid, v_route)
+            if fallback_hs and not v["headsign"]:
+                v["headsign"] = fallback_hs
+                break
 
         # PRECISIONE D'ARRIVO: prossima fermata con nome reale (GTFS-Static) e
         # minuti all'arrivo previsti da GTT. Con verifica di coerenza: se il GPS

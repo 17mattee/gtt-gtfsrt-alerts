@@ -116,7 +116,8 @@ class GtfsStaticManager:
         self._route_colors: dict = {}  # short_name -> "#RRGGBB" (colori ufficiali GTT)
         self._route_text_colors: dict = {}  # short_name -> "#RRGGBB"
         self._stops_cache: dict = {}    # stop_id -> {"name", "lat", "lon"} (fermate reali)
-        self._trip_headsigns: dict = {} # trip_id -> capolinea di destinazione (trips.txt)
+        self._trip_headsigns: dict = {} # trip_id -> headsign GTT (a volte e' l'ORIGINE, non affidabile)
+        self._trip_routes: dict = {}   # trip_id -> route_id GTFS (per coerenza linea-corsa)
         self._zip_bytes: bytes = b""    # pacchetto GTFS-Static in cache (per stop_times)
         self._trip_sequences: dict = {} # trip_id -> [(secondi_dalla_mezzanotte, stop_id), ...]
         self._cache_loaded_at: float = 0.0
@@ -204,9 +205,17 @@ class GtfsStaticManager:
         return self._trip_sequences
 
     def get_trip_headsigns(self) -> dict:
-        """Capolinea di destinazione per corsa: trip_id -> headsign (trips.txt GTT)."""
+        """Headsign per corsa (trips.txt GTT). ATTENZIONE: per alcune corse
+        varianti GTT pubblica l'origine anziche' la destinazione: usare
+        preferibilmente l'ultima fermata della sequenza (get_trip_sequences)."""
         if self._is_cache_fresh() and self._trip_headsigns:
             return self._trip_headsigns
+        return {}
+
+    def get_trip_routes(self) -> dict:
+        """Riferimento linea per corsa: trip_id -> route_id GTFS (es. '2U')."""
+        if self._is_cache_fresh() and self._trip_routes:
+            return self._trip_routes
         return {}
 
     def refresh_trip_sequences(self, trip_ids) -> int:
@@ -222,6 +231,12 @@ class GtfsStaticManager:
         if not wanted or not self._zip_bytes:
             return 0
         added = 0
+        # stop_times.txt NON e' contiguo per corsa: le righe di una corsa sono
+        # sparse nel file. Si ricostruiscono da zero TUTTE le corse richieste in
+        # un unico passaggio, accumulando ogni riga della stessa corsa ovunque
+        # compaia. Ogni passaggio e' autogiustificante (nessuno stato corrotto
+        # puo' sopravvivere).
+        in_pass = {}
         try:
             with zipfile.ZipFile(io.BytesIO(self._zip_bytes)) as z:
                 if "stop_times.txt" not in z.namelist():
@@ -230,7 +245,7 @@ class GtfsStaticManager:
                 reader = csv.DictReader(text)
                 for row in reader:
                     tid = (row.get("trip_id") or "").strip()
-                    if tid not in wanted or tid in self._trip_sequences:
+                    if tid not in wanted:
                         continue
                     arr = (row.get("arrival_time") or "").strip()
                     stop_id = (row.get("stop_id") or "").strip()
@@ -241,11 +256,18 @@ class GtfsStaticManager:
                         sched = hh * 3600 + mm * 60 + ss
                     except (ValueError, TypeError):
                         continue
-                    self._trip_sequences.setdefault(tid, []).append((sched, stop_id))
+                    in_pass.setdefault(tid, []).append((sched, stop_id))
                     added += 1
         except Exception as exc:
             logger.warning("stop_times.txt non leggibile (%s): fermate previste non disponibili.", exc)
-        # pulizia: conserva solo le corse richieste piu' quelle recenti
+            return 0
+        # Pubblica le sequenze ricostruite, ORDINATE per orario programamato:
+        # lungo una corsa gli orari crescono sempre, quindi l'ultima fermata
+        # della sequenza ordinata e' il capolinea di destinazione (il file
+        # stop_times di GTT non e' ordinato nemmeno internamente per corsa).
+        for lst in in_pass.values():
+            lst.sort(key=lambda item: item[0])
+        self._trip_sequences.update(in_pass)
         if len(self._trip_sequences) > 3000:
             self._trip_sequences = {k: v for k, v in self._trip_sequences.items() if k in wanted}
         return added
@@ -275,6 +297,7 @@ class GtfsStaticManager:
                 self._route_text_colors = routes.get("route_text_colors", {})
                 self._stops_cache = routes.get("stops", {})
                 self._trip_headsigns = routes.get("trip_headsigns", {})
+                self._trip_routes = routes.get("trip_routes", {})
                 self._zip_bytes = routes.get("zip_bytes", b"")
                 self._cache_loaded_at = time.time()
                 self._cache_source = "gtfs-static-ufficiale"
@@ -308,6 +331,7 @@ class GtfsStaticManager:
                     # Capolinea di destinazione per ogni corsa (trips.txt):
                     # e' la vera indicazione di direzione verso il terminale.
                     trip_headsigns = {}
+                    trip_routes = {}
                     if "trips.txt" in z.namelist():
                         try:
                             trips_content = z.read("trips.txt").decode("utf-8-sig")
@@ -316,6 +340,9 @@ class GtfsStaticManager:
                                 headsign = (trow.get("trip_headsign") or "").strip()
                                 if tid and headsign:
                                     trip_headsigns[tid] = headsign
+                                trip_route = (trow.get("route_id") or "").strip()
+                                if tid and trip_route:
+                                    trip_routes[tid] = trip_route
                         except Exception as exc:
                             logger.warning("trips.txt non leggibile (%s): capolinei non disponibili.", exc)
                     stops = {}
@@ -368,6 +395,7 @@ class GtfsStaticManager:
                         "route_text_colors": route_text_colors,
                         "stops": stops,
                         "trip_headsigns": trip_headsigns,
+                        "trip_routes": trip_routes,
                         "zip_bytes": response.content,
                     }
             except Exception as exc:
