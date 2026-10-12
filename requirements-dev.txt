@@ -7,7 +7,7 @@ testcontainers[postgres,redis]==4.9.0
 locust>=2.20.0
 pip-audit>=2.7.0
 pandas>=2.0.0
-apscheduler>=3.10.0
+apscheduler>=3.11.3
 prometheus-fastapi-instrumentator==7.1.0
 redis==5.2.0
 slowapi==0.1.9
