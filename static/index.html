@@ -121,6 +121,28 @@
         .popup-label { color: var(--text2); font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
         .popup-row { color: var(--text2); font-size: 0.8rem; margin-top: 3px; }
         .popup-alerts { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border2); }
+
+        /* ---------- Smartphone / iPhone: mappa in alto, pannello sotto ---------- */
+        @media (max-width: 820px) {
+            body { flex-direction: column; }
+            #map { order: 0; flex: none; height: 48vh; }
+            aside { order: 1; width: 100%; flex: 1; min-height: 0; border-right: none; border-top: 1px solid var(--border); }
+            .sidebar-header { padding: 10px 12px; gap: 8px; }
+            .sidebar-header h1 { font-size: 0.9rem; }
+            .sidebar-header p { font-size: 0.62rem; }
+            .stats-container { padding: 8px 10px; gap: 6px; }
+            .stat-box { padding: 7px 4px; border-radius: 8px; }
+            .stat-box span { font-size: 1.05rem; }
+            .stat-box label { font-size: 0.52rem; }
+            .lines-panel { padding: 8px 10px; max-height: 96px; overflow-y: auto; }
+            .lines-panel .group-label { margin: 6px 0 4px; font-size: 0.56rem; }
+            .chip { min-width: 32px; height: 25px; font-size: 0.7rem; padding: 0 6px; }
+            .feed-section { padding: 10px 10px; }
+            .card { padding: 8px 10px; gap: 8px; }
+            .legend { bottom: 10px; left: 8px; padding: 6px 9px; font-size: 0.65rem; }
+            .connection-status { padding: 8px 12px; font-size: 0.68rem; }
+            .line-badge { min-width: 36px; height: 24px; font-size: 0.74rem; }
+        }
     </style>
 </head>
 <body>
@@ -374,21 +396,24 @@
         connectWebSocket();
 
         function fmtDelay(seconds) {
-            if (seconds == null) return 'ritardo n/d';
+            if (seconds == null) seconds = 0;
             const min = Math.round(Math.abs(seconds) / 60);
             if (min < 1) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
             return min + ' min di ritardo';
         }
 
+        // Colori coerenti: verde SOLO in orario/anticipo, ambene 2-5 min di ritardo, rosso oltre.
         function delayClass(seconds) {
-            if (seconds == null || Math.abs(seconds) < 120) return 'delay-ok';
+            if (seconds == null) seconds = 0;
+            if (seconds < 0 || seconds <= 120) return 'delay-ok';
             if (seconds <= 300) return 'delay-warn';
             return 'delay-high';
         }
 
         function delayColor(seconds) {
-            if (seconds == null || Math.abs(seconds) < 120) return '#16a34a';
+            if (seconds == null) seconds = 0;
+            if (seconds < 0 || seconds <= 120) return '#16a34a';
             if (seconds <= 300) return '#d97706';
             return '#dc2626';
         }
@@ -486,7 +511,7 @@
                 const inFocus = !selectedLine || v.route_id === selectedLine;
                 if (selectedLine && v.route_id === selectedLine) focusBounds.push([lat, lon]);
 
-                const delay = delaysByTrip[v.trip_id];
+                const delay = delaysByTrip[v.trip_id] ?? 0;
                 const color = delayColor(delay);
                 const bearing = Number(v.bearing || 0);
                 const size = inFocus ? 13 : 9;
@@ -574,7 +599,7 @@
                 for (const v of group) {
                     if (shown >= 300) break;
                     shown++;
-                    const delay = delaysByTrip[v.trip_id];
+                    const delay = delaysByTrip[v.trip_id] ?? 0;
                     html += `<div class="card ${delayClass(delay)}" onclick="focusVehicle('${esc(v.vehicle_id)}')">
                         <div style="flex:1;display:flex;align-items:center;gap:6px;">
                             <strong>Mezzo ${esc(v.vehicle_id)}</strong>

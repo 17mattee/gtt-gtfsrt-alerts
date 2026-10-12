@@ -54,9 +54,9 @@ async def _background_refresher() -> None:
         except Exception as exc:
             logger.error("♻️ [REFRESHER] Ciclo di refresh fallito (%s): uso l'ultimo snapshot valido.", exc)
 
-        # Pausa brevissima: il fetch reale dura ~2-3s, quindi il dato fresco
-        # arriva tipicamente ogni ~4-5 secondi in modo continuo.
-        await asyncio.sleep(2)
+        # Pausa minima: il fetch parallelo dura ~2-3s, quindi il dato fresco
+        # arriva tipicamente ogni ~3-4 secondi, in scia con i feed GTT.
+        await asyncio.sleep(1)
 
 
 @asynccontextmanager

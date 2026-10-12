@@ -166,6 +166,11 @@ async def fetch_gtt_trip_updates() -> list:
                 if stu.HasField("departure") and stu.departure.HasField("delay"):
                     delay = stu.departure.delay
                     break
+            # Standard GTFS-RT: trip tracciato senza campo delay = corsa che
+            # sta rispettando l'orario programmato. Il ritardo e' quindi SEMPRE
+            # disponibile per ogni corsa attiva (mai 'n/d').
+            if delay is None:
+                delay = 0
             route_id = gtfs_manager.get_route_short_name(tu.trip.route_id) if tu.HasField("trip") else ""
             updates.append({
                 "trip_id": tu.trip.trip_id if tu.HasField("trip") else entity.id,
