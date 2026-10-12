@@ -1,6 +1,6 @@
 -r requirements.txt
 pytest>=8.0.0
-pytest-cov==6.0.0
+pytest-cov==7.1.0
 responses==0.25.6
 websockets>=12.0
 testcontainers[postgres,redis]==4.9.0
