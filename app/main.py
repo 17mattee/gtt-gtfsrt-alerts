@@ -16,15 +16,14 @@ from app.database import save_alerts_to_db, fetch_latest_alerts_from_db
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from prometheus_fastapi_instrumentator import Instrumentator
 import psycopg
 
-# Configurazione Logging Strutturato
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("GTT-Main")
 
 limiter = Limiter(key_func=get_remote_address)
 
-# Configurazione Redis Client (opzionale con fallback in-memory)
 redis_url = os.getenv("REDIS_URL")
 redis_client = redis.Redis.from_url(redis_url, decode_responses=True) if redis_url else None
 
@@ -61,17 +60,16 @@ def get_cached_alerts() -> list:
 async def lifespan(app: FastAPI):
     gtfs_manager._ensure_data_loaded()
     
-    logger.info("Primo avvio scraping GTT (Distributed Cache & Cold Start)...")
+    logger.info("Primo avvio scraping GTT (Circuit Breaker & Distributed Cache)...")
     initial_alerts = fetch_gtt_alerts()
     if initial_alerts:
         set_cached_alerts(initial_alerts)
         save_alerts_to_db(initial_alerts)
     else:
-        logger.warning("Scraping iniziale fallito o vuoto. Tentativo di recupero dallo storico Supabase...")
+        logger.warning("Scraping iniziale fallito. Recupero dallo storico Supabase...")
         fallback_alerts = fetch_latest_alerts_from_db()
         if fallback_alerts:
             set_cached_alerts(fallback_alerts)
-            logger.info(f"Ripristinati {len(fallback_alerts)} avvisi dallo storico Supabase.")
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(job_update_alerts, 'interval', minutes=2)
@@ -82,17 +80,16 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 def job_update_alerts():
-    logger.info("Aggiornamento periodico feed GTFS-RT (Distributed Cache)...")
+    logger.info("Aggiornamento periodico feed GTFS-RT...")
     alerts = fetch_gtt_alerts()
     if alerts:
         set_cached_alerts(alerts)
         save_alerts_to_db(alerts)
-        logger.info(f"Feed aggiornato con {len(alerts)} avvisi.")
 
 app = FastAPI(
     title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise ad alta affidabilità con Redis Distributed Caching, Cold Start Resiliency e Gzip.",
-    version="1.4.0",
+    description="Middleware enterprise con Circuit Breaker, Prometheus Metrics, Redis e Cold Start.",
+    version="1.5.0",
     lifespan=lifespan
 )
 
@@ -101,12 +98,14 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Configurazione Prometheus Instrumentator
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
 @app.get("/", response_class=HTMLResponse)
 @limiter.limit("30/minute")
 def dashboard(request: Request):
     current_alerts = get_cached_alerts()
     cache_len = len(current_alerts)
-    cache_backend = "Redis Distributed Cache" if redis_client else "In-Memory Thread-Safe Cache"
 
     html_content = f"""
     <!DOCTYPE html>
@@ -126,23 +125,22 @@ def dashboard(request: Request):
     </head>
     <body>
         <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">V1.4 REDIS READY</span></h1>
+            <h1>GTT GTFS-RT Middleware <span class="badge">V1.5 ENTERPRISE</span></h1>
             <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
             
             <h3>Endpoint Ufficiali:</h3>
             <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb" style="color: #38bdf8; text-decoration: none;">/gtfs-rt/alerts.pb</a></div>
             <div class="endpoint">GET <a href="/health" style="color: #38bdf8; text-decoration: none;">/health</a> (Health Check)</div>
+            <div class="endpoint">GET <a href="/metrics" style="color: #38bdf8; text-decoration: none;">/metrics</a> (Prometheus Metrics)</div>
             
             <h3>Stato Attuale:</h3>
             <p>Avvisi attivi in cache: <strong>{cache_len}</strong></p>
-            <p>Backend di Caching: <strong>{cache_backend}</strong></p>
             
             <h3>Ottimizzazioni Architetturali:</h3>
             <ul>
-                <li><strong>Distributed Caching:</strong> Integrazione Redis con fallback automatico</li>
-                <li><strong>Cold Start Resiliency:</strong> Ricarica automatica da DB in caso di down</li>
-                <li><strong>Gzip Compression & Thread Locking:</strong> Attivi</li>
-                <li><strong>Rate Limiting & Retries:</strong> Attivi e protetti</li>
+                <li><strong>Circuit Breaker:</strong> Protezione attiva contro i blackout della sorgente GTT</li>
+                <li><strong>Prometheus Observability:</strong> Metriche di performance esposte su /metrics</li>
+                <li><strong>Distributed Caching & Cold Start:</strong> Attivi e resilienti</li>
             </ul>
         </div>
     </body>

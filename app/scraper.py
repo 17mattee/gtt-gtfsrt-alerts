@@ -9,9 +9,13 @@ from google.transit import gtfs_realtime_pb2
 from app.gtfs_static import gtfs_manager
 from app.notifier import send_telegram_alert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import pybreaker
 
 logger = logging.getLogger("GTT-Scraper")
 GTT_RAW_URL = "https://www.gtt.to.it/cms/index.php?option=com_gtt&view=avvisi&tmpl=raw&priorita=1"
+
+# Circuit Breaker: apre il circuito dopo 3 fallimenti consecutivi, resetta dopo 60 secondi
+gtt_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 def parse_cause(text: str):
     text_lower = text.lower()
@@ -72,6 +76,7 @@ def extract_route_ids(text: str):
 
     return route_ids
 
+@gtt_breaker
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=8),
@@ -79,7 +84,7 @@ def extract_route_ids(text: str):
     reraise=True
 )
 def _request_gtt_page():
-    headers = {"User-Agent": "Mozilla/5.0 (Compatible; GTT-GTFS-RT-Middleware/1.3; +https://github.com/17mattee/gtt-gtfsrt-alerts)"}
+    headers = {"User-Agent": "Mozilla/5.0 (Compatible; GTT-GTFS-RT-Middleware/1.4; +https://github.com/17mattee/gtt-gtfsrt-alerts)"}
     response = requests.get(GTT_RAW_URL, headers=headers, timeout=10)
     response.raise_for_status()
     return response.text
@@ -87,6 +92,10 @@ def _request_gtt_page():
 def fetch_gtt_alerts():
     alerts = []
     try:
+        if gtt_breaker.current_state == "open":
+            logger.warning("Circuit Breaker APERTO: richiesta a GTT saltata temporaneamente per protezione.")
+            return []
+
         html_content = _request_gtt_page()
         soup = BeautifulSoup(html_content, "html.parser")
         raw_full_text = soup.get_text(separator=" ", strip=True)
@@ -109,13 +118,14 @@ def fetch_gtt_alerts():
                 "start_time": extract_start_time(text)
             })
             
-        # Controllo critico di integrità: se la pagina GTT risponde ma non estrae alcun blocco, il layout potrebbe essere cambiato
         if len(unique_texts) == 0 and len(html_content) > 500:
-            logger.warning("Attenzione: La pagina GTT è stata scaricata ma il parser non ha estratto alcun avviso. Possibile cambio di layout HTML.")
-            send_telegram_alert("⚠️ **GTT Scraper Warning**: La pagina GTT è raggiungibile ma non ha prodotto avvisi. Verificare eventuale cambio di layout HTML.")
+            logger.warning("Attenzione: La pagina GTT è stata scaricata ma il parser non ha estratto alcun avviso.")
+            send_telegram_alert("⚠️ **GTT Scraper Warning**: La pagina GTT è raggiungibile ma non ha prodotto avvisi. Possibile cambio di layout HTML.")
 
+    except pybreaker.CircuitBreakerError:
+        logger.error("Circuit Breaker attivo: impossibile contattare il portale GTT.")
     except Exception as e:
-        error_msg = f"Errore critico nello scraper GTT ottimizzato dopo i retry: {e}"
+        error_msg = f"Errore critico nello scraper GTT con Circuit Breaker: {e}"
         logger.error(error_msg)
         send_telegram_alert(error_msg)
 
