@@ -1,5 +1,5 @@
 -r requirements.txt
-pytest>=8.0.0
+pytest>=9.1.1
 pytest-cov==6.0.0
 responses==0.25.6
 websockets>=12.0
