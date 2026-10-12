@@ -7,96 +7,106 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: vh 100; height: 100vh; background: #0b1020; color: #f1f5f9; overflow: hidden; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; }
+        body { display: flex; height: 100vh; background: #eef1f6; color: #0f172a; overflow: hidden; }
 
-        aside { width: 460px; background: linear-gradient(180deg, #111827 0%, #0d1425 100%); border-right: 1px solid #1e293b; display: flex; flex-direction: column; z-index: 1000; box-shadow: 6px 0 25px rgba(0,0,0,0.45); }
-        .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid #1e293b; background: radial-gradient(120% 120% at 0% 0%, rgba(56,189,248,0.16) 0%, transparent 55%), #0b1020; }
-        .sidebar-header h1 { font-size: 1.25rem; font-weight: 800; color: #e2e8f0; display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em; }
-        .sidebar-header h1 em { font-style: normal; color: #38bdf8; }
-        .sidebar-header p { font-size: 0.74rem; color: #7d8ba1; margin-top: 5px; font-weight: 500; }
-        .pulse { width: 10px; height: 10px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 0 rgba(34,197,94,0.7); animation: pulse 1.8s infinite; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); } 70% { box-shadow: 0 0 0 9px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+        aside { width: 470px; background: #ffffff; border-right: 1px solid #dfe4ec; display: flex; flex-direction: column; z-index: 1000; }
 
-        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; padding: 14px 16px; border-bottom: 1px solid #1e293b; }
-        .stat-box { background: linear-gradient(160deg, #16203a 0%, #101728 100%); padding: 11px 6px; border-radius: 10px; border: 1px solid #24304a; text-align: center; transition: transform .15s; }
-        .stat-box:hover { transform: translateY(-2px); }
-        .stat-box span { display: block; font-size: 1.45rem; font-weight: 800; color: #38bdf8; line-height: 1.1; }
-        .stat-box label { font-size: 0.6rem; color: #8b99ad; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-        .stat-box.warn span { color: #fbbf24; }
-        .stat-box.danger span { color: #f87171; }
-        .stat-box.dev span { color: #c084fc; }
+        .sidebar-header { padding: 16px 18px 14px; border-bottom: 1px solid #eef1f6; display: flex; align-items: center; gap: 12px; }
+        .gtt-logo { background: #f7c500; color: #17181a; font-weight: 800; font-size: 0.95rem; padding: 7px 10px; border-radius: 8px; letter-spacing: 0.02em; flex-shrink: 0; }
+        .sidebar-header h1 { font-size: 1.02rem; font-weight: 800; color: #17181a; line-height: 1.2; letter-spacing: -0.01em; }
+        .sidebar-header p { font-size: 0.72rem; color: #8a93a6; margin-top: 2px; font-weight: 500; }
+        .live-dot { width: 8px; height: 8px; background: #16a34a; border-radius: 50%; margin-left: auto; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(22,163,74,0.15); }
+        @keyframes livepulse { 0%,100% { box-shadow: 0 0 0 3px rgba(22,163,74,0.15);} 50% { box-shadow: 0 0 0 6px rgba(22,163,74,0.08);} }
+        .live-dot.on { animation: livepulse 2s infinite; }
 
-        .tabs { display: flex; background: #0b1020; border-bottom: 1px solid #1e293b; }
-        .tab-btn { flex: 1; padding: 12px 4px; background: none; border: none; color: #7d8ba1; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }
-        .tab-btn.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; background: #101728; }
-        .tab-btn:hover { color: #bae6fd; }
+        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid #eef1f6; background: #fbfcfe; }
+        .stat-box { background: #ffffff; padding: 9px 6px; border-radius: 10px; border: 1px solid #e6eaf2; text-align: center; }
+        .stat-box span { display: block; font-size: 1.3rem; font-weight: 800; color: #17181a; line-height: 1.15; }
+        .stat-box label { font-size: 0.58rem; color: #8a93a6; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+        .stat-box.warn span { color: #b45309; }
+        .stat-box.danger span { color: #b91c1c; }
+        .stat-box.dev span { color: #6d28d9; }
 
-        .filter-bar { padding: 10px 14px; border-bottom: 1px solid #1e293b; background: #0e1526; }
-        .filter-bar input { width: 100%; background: #101a2e; border: 1px solid #24304a; color: #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; outline: none; }
-        .filter-bar input:focus { border-color: #38bdf8; }
-        .filter-bar input::placeholder { color: #64748b; }
-        .filter-bar .hint { font-size: 0.68rem; color: #64748b; margin-top: 6px; }
+        .tabs { display: flex; border-bottom: 1px solid #e6eaf2; background: #fbfcfe; }
+        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: #6b7487; font-weight: 700; font-size: 0.8rem; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+        .tab-btn.active { color: #17181a; border-bottom: 2px solid #f7c500; }
 
-        .line-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 128px; overflow-y: auto; padding: 10px 14px; border-bottom: 1px solid #1e293b; background: #0e1526; }
-        .line-chips::-webkit-scrollbar { width: 6px; }
-        .line-chips::-webkit-scrollbar-thumb { background: #24304a; border-radius: 3px; }
-        .chip { border: 1px solid #24304a; background: #101a2e; color: #a8b3c5; border-radius: 8px; min-width: 34px; height: 26px; padding: 0 7px; font-size: 0.74rem; font-weight: 700; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; justify-content: center; }
-        .chip:hover { border-color: #38bdf8; color: #e2e8f0; }
-        .chip.selected { outline: 2px solid #38bdf8; outline-offset: 1px; color: #fff; }
-        .chip.all { min-width: 52px; }
-        .chip.metro { border-bottom: 2px solid #f59e0b; }
-        .chip.tram { border-bottom: 2px solid #16a34a; }
-        .chip.bus { border-bottom: 2px solid #2563eb; }
+        /* --- Selettore linee: raggruppato per tipo, tutto a vista --- */
+        .lines-panel { border-bottom: 1px solid #eef1f6; background: #fbfcfe; padding: 10px 14px 12px; }
+        .lines-panel .group-label { font-size: 0.6rem; color: #8a93a6; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin: 8px 0 5px; }
+        .chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+        .chip { border: 1px solid #dde3ee; background: #fff; color: #3b4152; border-radius: 7px; min-width: 36px; height: 27px; padding: 0 8px; font-size: 0.76rem; font-weight: 700; cursor: pointer; transition: all 0.12s; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+        .chip:hover { border-color: #2563eb; color: #1740c8; background: #f0f5ff; }
+        .chip.selected { background: #1740c8; border-color: #1740c8; color: #fff; }
+        .chip .tdot { width: 6px; height: 6px; border-radius: 50%; }
+        .chip.tmetro .tdot { background: #f7c500; } .chip.ttram .tdot { background: #16a34a; } .chip.tbus .tdot { background: #2563eb; }
+        .chip.all-chip { background: #17181a; color: #fff; border-color: #17181a; padding: 0 12px; }
+        .chip.all-chip:hover { background: #33363b; }
+        .chip.all-chip.selected { outline: 2px solid #f7c500; outline-offset: 1px; }
+
+        .filter-bar { padding: 9px 14px; border-bottom: 1px solid #eef1f6; background: #fff; }
+        .filter-bar input { width: 100%; background: #f4f6fa; border: 1px solid #e0e5ef; color: #17181a; border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; outline: none; }
+        .filter-bar input:focus { border-color: #2563eb; background: #fff; }
+        .filter-bar input::placeholder { color: #a3abb9; }
 
         .feed-section { flex: 1; overflow-y: auto; padding: 12px 14px; display: none; }
         .feed-section.active { display: block; }
         .feed-section::-webkit-scrollbar { width: 8px; }
-        .feed-section::-webkit-scrollbar-thumb { background: #24304a; border-radius: 4px; }
+        .feed-section::-webkit-scrollbar-thumb { background: #d5dbe7; border-radius: 4px; }
 
-        .line-group-title { color: #7d8ba1; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 10px 2px 6px; }
+        .line-group-title { color: #6b7487; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; margin: 12px 2px 7px; display: flex; align-items: center; gap: 6px; }
+        .line-group-title:first-child { margin-top: 0; }
+        .line-group-title .route-name { color: #9aa3b5; font-weight: 600; text-transform: none; letter-spacing: 0; }
 
-        .card { background: #131c31; border: 1px solid #1f2a44; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
-        .card.alert { border-left: 3px solid #fbbf24; }
-        .card.detour { border-left: 3px solid #c084fc; background: linear-gradient(90deg, rgba(168,85,247,0.14), #131c31 50%); }
-        .card.delay-ok { border-left: 3px solid #22c55e; }
-        .card.delay-warn { border-left: 3px solid #fbbf24; }
-        .card.delay-high { border-left: 3px solid #ef4444; }
-        .card strong { color: #e8edf5; display: block; font-size: 0.86rem; font-weight: 600; }
-        .card span { color: #8b99ad; font-size: 0.75rem; }
+        .card { background: #fff; border: 1px solid #e6eaf2; border-radius: 10px; padding: 9px 11px; margin-bottom: 7px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: box-shadow 0.12s, transform 0.12s; }
+        .card:hover { box-shadow: 0 2px 10px rgba(23,24,26,0.08); transform: translateY(-1px); }
+        .card.alert { border-left: 3px solid #d97706; cursor: default; display: block; }
+        .card.detour { border-left: 3px solid #7c3aed; background: linear-gradient(90deg, #faf5ff, #fff 45%); cursor: default; display: block; }
+        .card.delay-ok { border-left: 3px solid #16a34a; }
+        .card.delay-warn { border-left: 3px solid #d97706; }
+        .card.delay-high { border-left: 3px solid #dc2626; }
+        .card strong { color: #17181a; display: block; font-size: 0.85rem; font-weight: 700; }
+        .card span { color: #6b7487; font-size: 0.75rem; }
 
-        .line-badge { min-width: 44px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); box-shadow: inset 0 -2px 0 rgba(0,0,0,0.2); flex-shrink: 0; padding: 0 6px; }
-        .line-badge.metro { background: #f59e0b; }
+        .line-badge { min-width: 42px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.82rem; color: #fff; flex-shrink: 0; padding: 0 6px; }
+        .line-badge.metro { background: #f7c500; color: #17181a; }
         .line-badge.tram { background: #16a34a; }
         .line-badge.bus { background: #2563eb; }
-        .line-badge.other { background: #64748b; }
+        .line-badge.other { background: #6b7487; }
 
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; text-transform: uppercase; }
-        .badge.detour { background: #7e22ce; color: #fff; }
-        .badge.delay { background: #b45309; color: #fff; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.02em; margin-right: 6px; text-transform: uppercase; }
+        .badge.detour { background: #7c3aed; color: #fff; }
+        .badge.delay { background: #d97706; color: #fff; }
         .badge.stop { background: #dc2626; color: #fff; }
-        .badge.info { background: #1d4ed8; color: #fff; }
+        .badge.info { background: #2563eb; color: #fff; }
 
-        #map { flex: 1; height: 100%; background: #0b1020; }
+        #map { flex: 1; height: 100%; background: #e8e4d8; }
 
-        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(11,16,32,0.93); border: 1px solid #24304a; border-radius: 10px; padding: 10px 14px; font-size: 0.72rem; color: #a8b3c5; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(255,255,255,0.95); border: 1px solid #e0e5ef; border-radius: 10px; padding: 8px 12px; font-size: 0.72rem; color: #3b4152; box-shadow: 0 3px 12px rgba(23,24,26,0.1); }
         .legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
-        .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.85); }
+        .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
 
-        .connection-status { padding: 11px 16px; font-size: 0.76rem; background: #0b1020; border-top: 1px solid #1e293b; display: flex; align-items: center; gap: 8px; color: #8b99ad; font-weight: 500; }
+        .connection-status { padding: 10px 16px; font-size: 0.74rem; background: #fbfcfe; border-top: 1px solid #eef1f6; display: flex; align-items: center; gap: 8px; color: #6b7487; font-weight: 600; }
 
-        .veh-icon { background: transparent; }
-        .leaflet-popup-content-wrapper { background: #131c31; color: #e8edf5; border-radius: 10px; }
-        .leaflet-popup-tip { background: #131c31; }
-        .leaflet-popup-content b, .leaflet-popup-content strong { color: #38bdf8; }
+        .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 6px 24px rgba(23,24,26,0.16); }
+        .popup-route { font-weight: 800; font-size: 0.95rem; color: #17181a; }
+        .popup-big-delay { font-size: 1.25rem; font-weight: 800; margin: 4px 0 2px; }
+        .popup-label { color: #8a93a6; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+        .popup-row { color: #3b4152; font-size: 0.8rem; margin-top: 3px; }
+        .popup-alerts { margin-top: 8px; padding-top: 8px; border-top: 1px solid #eef1f6; }
     </style>
 </head>
 <body>
 
     <aside>
         <div class="sidebar-header">
-            <h1><span class="pulse"></span> GTT Torino <em>Control Room</em></h1>
-            <p>GTT GTFS-RT Live Dashboard & Map — Flotta, posizioni GPS, ritardi e allerte live</p>
+            <span class="gtt-logo">GTT</span>
+            <div>
+                <h1>Torino Control Room</h1>
+                <p>GTT GTFS-RT Live Dashboard & Map — Flotta, ritardi e allerte live</p>
+            </div>
+            <span class="live-dot" id="live-dot"></span>
         </div>
 
         <div class="stats-container">
@@ -133,10 +143,9 @@
         </div>
 
         <div id="vehicles-tab" class="feed-section active">
-            <div class="line-chips" id="line-chips"></div>
+            <div class="lines-panel" id="lines-panel"></div>
             <div class="filter-bar">
-                <input id="fleet-filter" type="text" placeholder="Cerca un numero mezzo (es. 9622U)" oninput="renderFleetList()">
-                <div class="hint">Clicca una linea qui sopra: la lista mostra solo i suoi mezzi e la mappa zooma su di essa.</div>
+                <input id="fleet-filter" type="text" placeholder="Cerca una linea o un numero mezzo (es. 15, 9622U)" oninput="renderFleetList()">
             </div>
             <div id="vehicles-list">
                 <div class="card"><strong>Caricamento flotta in corso...</strong><span>Attendere la sincronizzazione GPS con Torino.</span></div>
@@ -166,29 +175,27 @@
     <div id="map"></div>
 
     <div class="legend">
-        <div><span class="dot" style="background:#22c55e;"></span> In orario</div>
-        <div><span class="dot" style="background:#fbbf24;"></span> Ritardo 2-5 min</div>
-        <div><span class="dot" style="background:#ef4444;"></span> Ritardo &gt; 5 min</div>
+        <div><span class="dot" style="background:#16a34a;"></span> In orario</div>
+        <div><span class="dot" style="background:#d97706;"></span> Ritardo 2-5 min</div>
+        <div><span class="dot" style="background:#dc2626;"></span> Ritardo &gt; 5 min</div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([45.0703, 7.6869], 12);
+        const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 12);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Tile scure stile control room senza API key (Esri Dark Gray Canvas)
-        L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        // Mappe di base libere e leggibili: le strade di Torino si vedono tutte.
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: 'Tiles &copy; Esri, HERE, Garmin | &copy; OpenStreetMap contributors | Dati GTT CC BY 4.0'
-        }).addTo(map);
-        L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 19
+            attribution: '&copy; OpenStreetMap contributors | Dati GTT (CC BY 4.0)'
         }).addTo(map);
 
         let markersLayer = L.layerGroup().addTo(map);
         let lastData = null;
         let boundsFitted = false;
-        let selectedLine = null;   // linea scelta dai chip: la mappa e la lista la seguono
+        let selectedLine = null;
+        let markersByVehicle = {};   // vehicle_id -> marker, per aprire il popup dalla lista
 
         function switchTab(tabId, btn) {
             document.querySelectorAll('.feed-section').forEach(el => el.classList.remove('active'));
@@ -204,51 +211,57 @@
                 .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
-        // Badge linea colorato per tipo di mezzo: metro gialla, tram verde, bus blu.
-        function lineBadge(routeId) {
-            const r = String(routeId || '');
-            let cls = 'bus';
-            if (/^m/i.test(r)) cls = 'metro';
-            else if (/^(3|4|9|10|15|16|18|star)/i.test(r)) cls = 'tram';
-            if (!r || r === 'N/A') cls = 'other';
-            return '<span class="line-badge ' + cls + '">' + esc(r || '?') + '</span>';
-        }
-
         function routeClass(routeId) {
             const r = String(routeId || '');
             if (/^m/i.test(r)) return 'metro';
-            if (/^(3|4|9|10|15|16|18|star)/i.test(r)) return 'tram';
+            if (/^(3|4|6|7|8|9|10|13|15|16|18|star)/i.test(r)) return 'tram';
             return 'bus';
+        }
+
+        function lineBadge(routeId) {
+            const r = String(routeId || '');
+            const cls = (!r || r === 'N/A') ? 'other' : routeClass(r);
+            return '<span class="line-badge ' + cls + '">' + esc(r || '?') + '</span>';
         }
 
         function selectLine(routeId) {
             selectedLine = (selectedLine === routeId) ? null : routeId;
-            boundsFitted = false; // forza il re-zoom della mappa sulla selezione
-            renderLineChips();
+            boundsFitted = false;
+            renderLinesPanel();
             if (lastData) updateUI(lastData);
         }
 
-        function renderLineChips() {
+        // Selettore linee raggruppato per tipo: metro, tram e bus tutti a vista.
+        function renderLinesPanel() {
             if (!lastData) return;
             const counts = {};
             (lastData.vehicles || []).forEach(v => {
                 const key = v.route_id || 'N/A';
                 counts[key] = (counts[key] || 0) + 1;
             });
-            const keys = Object.keys(counts).sort((a, b) => {
-                const rank = k => (routeClass(k) === 'metro' ? 0 : routeClass(k) === 'tram' ? 1 : 2);
-                if (rank(a) !== rank(b)) return rank(a) - rank(b);
+            const total = (lastData.vehicles || []).length;
+
+            const groups = { metro: [], tram: [], bus: [], other: [] };
+            Object.keys(counts).forEach(k => groups[routeClass(k)].push(k));
+            const numeric = (a, b) => {
                 const na = parseFloat(a), nb = parseFloat(b);
                 if (isNaN(na) && isNaN(nb)) return a.localeCompare(b);
                 if (isNaN(na)) return 1;
                 if (isNaN(nb)) return -1;
                 return na - nb;
-            });
-            let html = `<span class="chip all ${selectedLine === null ? 'selected' : ''}" onclick="selectLine(null)">Tutte</span>`;
-            for (const k of keys) {
-                html += `<span class="chip ${routeClass(k)} ${selectedLine === k ? 'selected' : ''}" title="${esc(k)} · ${counts[k]} mezzi in strada" onclick="selectLine('${esc(k)}')">${esc(k)}</span>`;
-            }
-            document.getElementById('line-chips').innerHTML = html;
+            };
+            for (const g of Object.values(groups)) g.sort(numeric);
+
+            const chip = (k) => `<span class="chip t${routeClass(k)} ${selectedLine === k ? 'selected' : ''}" title="Linea ${esc(k)} · ${counts[k]} mezzi" onclick="selectLine('${esc(k)}')"><span class="tdot"></span>${esc(k)}</span>`;
+
+            let html = `<div class="chip-row" style="margin-top:0;">
+                <span class="chip all-chip ${selectedLine === null ? 'selected' : ''}" onclick="selectLine(null)">Tutte le linee · ${total} mezzi</span></div>`;
+            if (groups.metro.length) html += `<div class="group-label">Metropolitana</div><div class="chip-row">${groups.metro.map(chip).join('')}</div>`;
+            if (groups.tram.length) html += `<div class="group-label">Tram</div><div class="chip-row">${groups.tram.map(chip).join('')}</div>`;
+            if (groups.bus.length) html += `<div class="group-label">Bus</div><div class="chip-row">${groups.bus.map(chip).join('')}</div>`;
+            if (groups.other.length) html += `<div class="chip-row">${groups.other.map(chip).join('')}</div>`;
+
+            document.getElementById('lines-panel').innerHTML = html;
         }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -260,12 +273,12 @@
 
             ws.onopen = () => {
                 reconnectAttempts = 0;
-                document.getElementById('ws-status').innerHTML = '<span class="pulse"></span> Connesso al flusso in tempo reale';
+                document.getElementById('ws-status').innerHTML = '<span class="live-dot on"></span> Connesso al flusso in tempo reale';
             };
 
             ws.onclose = () => {
                 const delay = Math.min(3000 * (reconnectAttempts + 1), 15000);
-                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#fbbf24;width:8px;height:8px;display:inline-block;border-radius:50%;"></span> Riconnessione automatica tra ' + (delay / 1000) + 's...';
+                document.getElementById('ws-status').innerHTML = 'Riconnessione automatica tra ' + (delay / 1000) + 's...';
                 reconnectAttempts++;
                 setTimeout(connectWebSocket, delay);
             };
@@ -275,9 +288,8 @@
             ws.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    const data = message.data || message;
-                    lastData = data;
-                    updateUI(data);
+                    lastData = message.data || message;
+                    updateUI(lastData);
                 } catch (err) {
                     console.error("Errore WebSocket:", err);
                 }
@@ -286,7 +298,7 @@
         connectWebSocket();
 
         function fmtDelay(seconds) {
-            if (seconds == null) return 'n/d';
+            if (seconds == null) return 'ritardo n/d';
             const min = Math.round(Math.abs(seconds) / 60);
             if (min < 1) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
@@ -300,9 +312,9 @@
         }
 
         function delayColor(seconds) {
-            if (seconds == null || Math.abs(seconds) < 120) return '#22c55e';
-            if (seconds <= 300) return '#fbbf24';
-            return '#ef4444';
+            if (seconds == null || Math.abs(seconds) < 120) return '#16a34a';
+            if (seconds <= 300) return '#d97706';
+            return '#dc2626';
         }
 
         function fmtSpeed(speedMs) {
@@ -310,6 +322,12 @@
             const kmh = Number(speedMs) * 3.6;
             if (kmh < 1) return 'fermo in sosta';
             return kmh.toFixed(1) + ' km/h';
+        }
+
+        function fmtDirection(bearing) {
+            if (bearing == null) return 'n/d';
+            const dirs = ['Nord', 'Nord-Est', 'Est', 'Sud-Est', 'Sud', 'Sud-Ovest', 'Ovest', 'Nord-Ovest'];
+            return dirs[Math.round(Number(bearing) / 45) % 8];
         }
 
         function categoryBadge(al) {
@@ -323,6 +341,27 @@
             }
         }
 
+        // Popup completo del mezzo: tutto quello che si sa, in chiaro.
+        function vehiclePopup(v, delay, routesCatalog, alerts) {
+            const gpsTime = v.timestamp ? new Date(Number(v.timestamp) * 1000).toLocaleTimeString('it-IT') : 'n/d';
+            const lineAlerts = alerts.filter(al => (al.affected_routes || []).includes(v.route_id));
+            const devOnLine = lineAlerts.filter(al => al.category === 'deviazione').length;
+            let html = '<div style="min-width:230px;">';
+            html += '<div class="popup-route">' + lineBadge(v.route_id) + ' Mezzo ' + esc(v.vehicle_id) + '</div>';
+            if (routesCatalog[v.route_id]) html += '<div class="popup-row">' + esc(routesCatalog[v.route_id]) + '</div>';
+            html += '<div class="popup-big-delay" style="color:' + delayColor(delay) + ';">' + fmtDelay(delay) + '</div>';
+            html += '<div class="popup-row">' + fmtSpeed(v.speed) + ' · direzione ' + fmtDirection(v.bearing) + '</div>';
+            html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
+            html += '<div class="popup-row" style="color:#8a93a6;">GPS aggiornato alle ' + gpsTime + '</div>';
+            if (lineAlerts.length) {
+                html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
+                lineAlerts.slice(0, 2).forEach(al => { html += '<div class="popup-row" style="font-weight:600;">' + esc(al.header) + '</div>'; });
+                if (lineAlerts.length > 2) html += '<div class="popup-row" style="color:#8a93a6;">…e altre ' + (lineAlerts.length - 2) + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
         function updateUI(data) {
             lastData = data;
             const vehicles = data.vehicles || [];
@@ -331,14 +370,12 @@
             const routesCatalog = data.routes_catalog || {};
             const meta = data.meta || {};
 
-            // Ritardo per corsa, agganciato ai mezzi via trip_id.
             const delaysByTrip = {};
             tripUpdates.forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
 
             const detours = alerts.filter(al => al.category === 'deviazione').length;
             const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds > 120).length;
             const live = meta.vehicles_source === 'live';
-            const simulated = meta.vehicles_source === 'simulated' || meta.vehicles_source === 'snapshot';
 
             document.getElementById('active-vehicles').innerText = vehicles.length;
             document.getElementById('active-alerts').innerText = alerts.length;
@@ -346,54 +383,54 @@
             document.getElementById('delayed-trips').innerText = delayedTrips;
             document.getElementById('active-routes').innerText = Object.keys(routesCatalog).length;
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT');
+            document.getElementById('live-dot').className = 'live-dot on';
 
-            document.getElementById('ws-status').innerHTML = '<span class="pulse"></span> ' +
-                (live ? 'Streaming LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
-                 (simulated ? 'Streaming attivo (modalità smart-fallback GTT)' : 'Streaming attivo'));
+            document.getElementById('ws-status').innerHTML = '<span class="live-dot on"></span> ' +
+                (live ? 'LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
+                 'Streaming attivo (modalità smart-fallback GTT)');
 
-            // --- Mappa: se una linea e' selezionata, mostra SOLO i suoi mezzi e zooma ---
+            // --- Mappa: TUTTI i mezzi sempre visibili; la linea selezionata e'
+            //     a dimensione piena con freccia di direzione, le altre attenuate. ---
             markersLayer.clearLayers();
-            const bounds = [];
+            markersByVehicle = {};
+            const focusBounds = [];
+            const allBounds = [];
             for (const v of vehicles) {
-                if (selectedLine && v.route_id !== selectedLine) continue;
                 const lat = Number(v.latitude || 0);
                 const lon = Number(v.longitude || 0);
                 if (!lat || !lon) continue;
-                bounds.push([lat, lon]);
+                allBounds.push([lat, lon]);
+                const inFocus = !selectedLine || v.route_id === selectedLine;
+                if (selectedLine && v.route_id === selectedLine) focusBounds.push([lat, lon]);
 
                 const delay = delaysByTrip[v.trip_id];
                 const color = delayColor(delay);
                 const bearing = Number(v.bearing || 0);
-                // Freccia orientata alla direzione reale di marcia sopra un pallino colorato
-                const arrow = bearing
-                    ? `<div style="position:absolute;top:-7px;left:50%;transform:translateX(-50%) rotate(${bearing}deg);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};filter:drop-shadow(0 0 2px rgba(0,0,0,0.8));"></div>`
+                const size = inFocus ? 13 : 9;
+                const opacity = inFocus ? 1 : 0.45;
+                const arrow = (inFocus && bearing)
+                    ? `<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%) rotate(${bearing}deg);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid ${color};filter:drop-shadow(0 1px 1px rgba(0,0,0,0.4));"></div>`
                     : '';
-                const dotHtml = `<div style="position:relative;width:13px;height:13px;">${arrow}<div style="width:13px;height:13px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 7px ${color};"></div></div>`;
-                const icon = L.divIcon({ className: 'veh-icon', html: dotHtml, iconSize: [13, 13] });
+                const dotHtml = `<div style="position:relative;width:${size}px;height:${size}px;opacity:${opacity};">${arrow}<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);"></div></div>`;
+                const icon = L.divIcon({ className: 'veh-icon', html: dotHtml, iconSize: [size, size] });
                 const marker = L.marker([lat, lon], { icon });
-                marker.bindPopup(
-                    '<div style="min-width:170px;">' +
-                    '<strong>Linea ' + esc(v.route_id) + '</strong> · Mezzo ' + esc(v.vehicle_id) + '<br>' +
-                    fmtSpeed(v.speed) + ' · ' + fmtDelay(delay) + '<br>' +
-                    (routesCatalog[v.route_id] ? '<span style="font-size:0.78rem;color:#8b99ad;">' + esc(routesCatalog[v.route_id]) + '</span><br>' : '') +
-                    '<span style="font-size:0.72rem;color:#8b99ad;">Corsa ' + esc(v.trip_id) + '</span>' +
-                    '</div>'
-                );
+                marker.bindPopup(vehiclePopup(v, delay, routesCatalog, alerts), { maxWidth: 300 });
                 markersLayer.addLayer(marker);
+                markersByVehicle[v.vehicle_id] = marker;
             }
-            if (bounds.length && !boundsFitted) {
-                map.fitBounds(bounds, { padding: [40, 40], maxZoom: selectedLine ? 14 : 13 });
+
+            if (!boundsFitted && (selectedLine ? focusBounds : allBounds).length) {
+                map.flyToBounds(selectedLine ? focusBounds : allBounds, { padding: [50, 50], maxZoom: selectedLine ? 14 : 13, duration: 0.8 });
                 boundsFitted = true;
             }
 
-            renderLineChips();
+            renderLinesPanel();
             renderFleetList();
-            renderDelaysList(tripUpdates, delaysByTrip);
+            renderDelaysList(tripUpdates);
 
             // --- Avvisi: DEVIAZIONI PRIMA, spiegazione massimamente chiara ---
             const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
-            const sorted = alerts.slice().sort((a, b) =>
-                (order[a.category] ?? 9) - (order[b.category] ?? 9));
+            const sorted = alerts.slice().sort((a, b) => (order[a.category] ?? 9) - (order[b.category] ?? 9));
 
             document.getElementById('alerts-list').innerHTML = sorted.length ? sorted.map(al => {
                 const routes = (al.affected_routes || []).join(', ');
@@ -402,46 +439,41 @@
                 const causeTxt = al.cause_label || '';
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
                 if (isDetour) {
-                    line += `<div><strong>DEVIATIONE — Linea ${esc(routes || 'rete')}</strong>
-                             <span style="display:block;color:#e9d5ff;font-weight:600;margin-top:2px;">Percorso modificato: itinerario alternativo. ${esc(effectTxt)}</span></div>`;
+                    line += `<strong>DEVIATIONE — Linea ${esc(routes || 'rete')}</strong>
+                             <span style="display:block;color:#6d28d9;font-weight:700;margin-top:2px;">Percorso modificato: itinerario alternativo. ${esc(effectTxt)}</span>`;
                 } else {
-                    line += `<div><strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>
-                             <span style="display:block;margin-top:2px;">${esc(al.header)}</span></div>`;
+                    line += `<strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>
+                             <span style="display:block;margin-top:2px;">${esc(al.header)}</span>`;
                 }
                 if (al.description && !isDetour) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
-                line += `<span style="display:block;margin-top:3px;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span>`;
+                line += `<span style="display:block;margin-top:4px;color:#8a93a6;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span>`;
                 line += '</div>';
                 return line;
             }).join('') :
                 '<div class="card alert"><strong>Nessuna interruzione critica</strong><span>La rete GTT risulta regolare su tutte le linee urbane e metropolitane.</span></div>';
         }
 
+        // Dalla lista al mezzo: clic sulla card = volo sul mezzo e popup completo.
+        function focusVehicle(vehicleId) {
+            const marker = markersByVehicle[vehicleId];
+            if (!marker) return;
+            map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.7 });
+            marker.openPopup();
+        }
+
         function renderFleetList() {
             if (!lastData) return;
-            const vehicles = (lastData.vehicles || []).filter(v => !selectedLine || v.route_id === selectedLine);
             const routesCatalog = lastData.routes_catalog || {};
             const delaysByTrip = {};
             (lastData.trip_updates || []).forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
 
             const query = (document.getElementById('fleet-filter').value || '').trim().toLowerCase();
-            const filtered = vehicles.filter(v => {
-                if (!query) return true;
-                return String(v.route_id).toLowerCase().includes(query) ||
-                       String(v.vehicle_id).toLowerCase().includes(query);
-            });
-
-            // Con una linea selezionata la lista parte gia' filtrata: niente scroll infinito.
-            let html = '';
-            if (selectedLine) {
-                const longName = routesCatalog[selectedLine];
-                html += `<div class="line-group-title">Linea ${esc(selectedLine)}${longName ? ' — ' + esc(longName) : ''} · ${filtered.length} mezzi</div>`;
-            }
+            const vehicles = (lastData.vehicles || [])
+                .filter(v => !selectedLine || v.route_id === selectedLine)
+                .filter(v => !query || String(v.route_id).toLowerCase().includes(query) || String(v.vehicle_id).toLowerCase().includes(query));
 
             const byRoute = {};
-            filtered.forEach(v => {
-                const key = v.route_id || 'N/A';
-                (byRoute[key] = byRoute[key] || []).push(v);
-            });
+            vehicles.forEach(v => { const key = v.route_id || 'N/A'; (byRoute[key] = byRoute[key] || []).push(v); });
             const routeKeys = Object.keys(byRoute).sort((a, b) => {
                 const na = parseFloat(a), nb = parseFloat(b);
                 if (isNaN(na) && isNaN(nb)) return a.localeCompare(b);
@@ -450,19 +482,17 @@
                 return na - nb;
             });
 
+            let html = '';
             let shown = 0;
             for (const key of routeKeys) {
-                if (shown >= 150) break;
                 const group = byRoute[key];
                 const longName = routesCatalog[key];
-                if (!selectedLine) {
-                    html += `<div class="line-group-title">Linea ${esc(key)}${longName ? ' — ' + esc(longName) : ''} · ${group.length} mezzi</div>`;
-                }
+                html += `<div class="line-group-title">Linea ${esc(key)} · ${group.length} mezzi${longName ? `<span class="route-name">— ${esc(longName)}</span>` : ''}</div>`;
                 for (const v of group) {
-                    if (shown >= 150) { html += '<div class="card"><span>…altri mezzi nascosti, usa il filtro per affinare</span></div>'; break; }
+                    if (shown >= 300) break;
                     shown++;
                     const delay = delaysByTrip[v.trip_id];
-                    html += `<div class="card ${delayClass(delay)}">
+                    html += `<div class="card ${delayClass(delay)}" onclick="focusVehicle('${esc(v.vehicle_id)}')">
                         ${lineBadge(key)}
                         <div style="flex:1;">
                             <strong>Mezzo ${esc(v.vehicle_id)}</strong>
@@ -472,19 +502,19 @@
                 }
             }
             document.getElementById('vehicles-list').innerHTML = html ||
-                '<div class="card"><strong>Nessun veicolo trovato</strong><span>Nessun mezzo corrisponde al filtro o il feed non è raggiungibile.</span></div>';
+                '<div class="card"><strong>Nessun veicolo trovato</strong><span>Nessun mezzo corrisponde alla selezione: prova "Tutte le linee" o cambia filtro.</span></div>';
         }
 
         function renderDelaysList(tripUpdates) {
             const withDelay = tripUpdates.filter(tu => tu.delay_seconds != null)
                 .sort((a, b) => b.delay_seconds - a.delay_seconds);
-            document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 150).map(tu => {
+            document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 200).map(tu => {
                 const d = tu.delay_seconds;
-                return `<div class="card ${delayClass(d)}">
+                return `<div class="card ${delayClass(d)}" onclick="focusVehicle('${esc(tu.vehicle_id || '')}')">
                     ${lineBadge(tu.route_id)}
                     <div style="flex:1;">
-                        <strong>Corsa ${esc(tu.trip_id)}${tu.vehicle_id ? ' · Mezzo ' + esc(tu.vehicle_id) : ''}</strong>
-                        <span>${fmtDelay(d)}</span>
+                        <strong>Corsa ${esc(tu.trip_id)}</strong>
+                        <span>${fmtDelay(d)}${tu.vehicle_id ? ' · Mezzo ' + esc(tu.vehicle_id) : ''}</span>
                     </div>
                 </div>`;
             }).join('') :
