@@ -349,10 +349,10 @@
             };
             Object.values(groups).forEach(g => g.sort(numeric));
 
-            const chip = (k) => `<span class="chip ${selectedLine === k ? 'selected' : ''}" title="Linea ${esc(k)} · ${counts[k]} mezzi" onclick="selectLine('${esc(k)}')"><span class="tdot" style="background:${colorOf(k)};"></span>${esc(k)}</span>`;
+            const chip = (k) => `<span class="chip ${selectedLine === k ? 'selected' : ''}" title="Linea ${esc(k)} · ${counts[k]} mezzi" data-line="${esc(k)}"><span class="tdot" style="background:${colorOf(k)};"></span>${esc(k)}</span>`;
 
             let html = `<div class="chip-row" style="margin-top:0;">
-                <span class="chip all-chip ${selectedLine === null ? 'selected' : ''}" onclick="selectLine(null)">Tutte le linee · ${total} mezzi</span></div>`;
+                <span class="chip all-chip ${selectedLine === null ? 'selected' : ''}" data-line="">Tutte le linee · ${total} mezzi</span></div>`;
             const order = [1, 0, 7, 3];
             for (const t of order) {
                 if (groups[t] && groups[t].length) {
@@ -394,6 +394,18 @@
             };
         }
         connectWebSocket();
+
+        // Event delegation: nessun onclick interpolato con dati esterni (XSS-proof).
+        document.getElementById('lines-panel').addEventListener('click', (e) => {
+            const chipEl = e.target.closest('.chip');
+            if (chipEl) selectLine(chipEl.dataset.line || null);
+        });
+        for (const listId of ['vehicles-list', 'delays-list']) {
+            document.getElementById(listId).addEventListener('click', (e) => {
+                const cardEl = e.target.closest('[data-vehicle]');
+                if (cardEl && cardEl.dataset.vehicle) focusVehicle(cardEl.dataset.vehicle);
+            });
+        }
 
         function fmtDelay(seconds) {
             if (seconds == null) seconds = 0;
@@ -475,8 +487,7 @@
             const routesCatalog = data.routes_catalog || {};
             const meta = data.meta || {};
 
-            const delaysByTrip = {};
-            tripUpdates.forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
+            // Il ritardo di ogni mezzo arriva già risolto dal server (v.delay_seconds).
 
             const detours = alerts.filter(al => al.category === 'deviazione').length;
             const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds > 120).length;
@@ -514,7 +525,7 @@
                 const inFocus = !selectedLine || v.route_id === selectedLine;
                 if (selectedLine && v.route_id === selectedLine) focusBounds.push([lat, lon]);
 
-                const delay = delaysByTrip[v.trip_id] ?? 0;
+                const delay = v.delay_seconds ?? 0;
                 const color = delayColor(delay);
                 const bearing = Number(v.bearing || 0);
                 const size = inFocus ? 13 : 9;
@@ -575,8 +586,6 @@
         function renderFleetList() {
             if (!lastData) return;
             const routesCatalog = lastData.routes_catalog || {};
-            const delaysByTrip = {};
-            (lastData.trip_updates || []).forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
 
             const query = (document.getElementById('fleet-filter').value || '').trim().toLowerCase();
             const vehicles = (lastData.vehicles || [])
@@ -602,8 +611,8 @@
                 for (const v of group) {
                     if (shown >= 300) break;
                     shown++;
-                    const delay = delaysByTrip[v.trip_id] ?? 0;
-                    html += `<div class="card ${delayClass(delay)}" onclick="focusVehicle('${esc(v.vehicle_id)}')">
+                    const delay = v.delay_seconds ?? 0;
+                    html += `<div class="card ${delayClass(delay)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;display:flex;align-items:center;gap:6px;">
                             <strong>Mezzo ${esc(v.vehicle_id)}</strong>
                         </div>
@@ -620,7 +629,7 @@
                 .sort((a, b) => b.delay_seconds - a.delay_seconds);
             document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 200).map(tu => {
                 const d = tu.delay_seconds;
-                return `<div class="card ${delayClass(d)}" onclick="focusVehicle('${esc(tu.vehicle_id || '')}')">
+                return `<div class="card ${delayClass(d)}" data-vehicle="${esc(tu.vehicle_id || '')}">
                     ${lineBadge(tu.route_id)}
                     <div style="flex:1;">
                         <strong>Corsa ${esc(tu.trip_id)}</strong>

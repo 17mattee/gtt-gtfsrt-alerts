@@ -125,6 +125,20 @@ async def fetch_all_gtt_data() -> dict:
         if resolved:
             tu["route_id"] = resolved
 
+    # RITARDO PEFETTO: join lato server, PRIMA per vehicle_id (identita' stabile
+    # del mezzo anche quando cambia corsa), poi per trip_id, infine 0 (in orario).
+    # I due feed sono scaricati a millisecondi di distanza: il join per trip_id
+    # da' falsi 'n/d' o ritardi di corsa precedente; per vehicle_id e' esatto.
+    delay_by_vehicle = {tu.get("vehicle_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("vehicle_id") and tu.get("delay_seconds") is not None}
+    delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
+    for v in vehicles:
+        delay = None
+        if v.get("vehicle_id"):
+            delay = delay_by_vehicle.get(v["vehicle_id"])
+        if delay is None and v.get("trip_id"):
+            delay = delay_by_trip.get(v["trip_id"])
+        v["delay_seconds"] = delay if delay is not None else 0
+
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates
     print(f"🚌 [SYNC] FASE 2 OK -> Flotta tracciata: {len(vehicles)} mezzi ({getattr(vehicles_scraper, 'last_fetch_source', '?')}).")

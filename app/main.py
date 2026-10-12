@@ -4,7 +4,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.transit import gtfs_realtime_pb2
@@ -20,8 +20,22 @@ logging.basicConfig(
 logger = logging.getLogger("GTT-Main")
 
 
+_last_persist_at = 0.0
+PERSIST_INTERVAL_SECONDS = 30
+
+
 async def _persist_snapshot(data: dict) -> None:
-    """Persistenza opzionale su Supabase (no-op se non configurato). Mai bloccante, mai fatale."""
+    """Persistenza opzionale su Supabase (no-op se non configurato).
+
+    Throttata a una scrittura ogni 30s: la rete pubblica ~440 posizioni per
+    ciclo e senza freno riempirebbe il database (milioni di righe al giorno).
+    Mai bloccante, mai fatale.
+    """
+    global _last_persist_at
+    now = time.time()
+    if now - _last_persist_at < PERSIST_INTERVAL_SECONDS:
+        return
+    _last_persist_at = now
     try:
         from app.database_writer import save_network_data_to_db
         # save_network_data_to_db è async ma usa il client sync Supabase:
@@ -77,6 +91,51 @@ app = FastAPI(
 # Monta la cartella statica per servire la UI
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# --- Sicurezza: header di risposta + CSP contro XSS/clickjacking/injection ---
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+    "font-src https://fonts.gstatic.com; "
+    "img-src 'self' data: https://*.tile.openstreetmap.org https://services.arcgisonline.com; "
+    "connect-src 'self' ws: wss:"
+)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = _CSP
+    return response
+
+
+# Host allowlist opzionale: attiva SOLO se imposti ALLOWED_HOSTS (protegge da
+# attacchi Host-header). Di default resta aperto per consentire i test in LAN
+# (es. iPhone che punta all'IP del Mac). Esempio:
+#   ALLOWED_HOSTS="127.0.0.1,localhost,gtt-gtfsrt-alerts.onrender.com"
+_allowed_hosts = os.getenv("ALLOWED_HOSTS")
+if _allowed_hosts:
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts.split(","))
+
+
+# --- Rate limit semplice sul proxy GTT (protegge i feed GTT dall'abuso) ---
+_rate_buckets: dict = {}
+RATE_LIMIT_PER_MINUTE = 60
+
+
+def _rate_limited(client_ip: str) -> bool:
+    now = time.time()
+    window = _rate_buckets.setdefault(client_ip, [])
+    window[:] = [t for t in window if now - t < 60]
+    if len(window) >= RATE_LIMIT_PER_MINUTE:
+        return True
+    window.append(now)
+    return False
+
 
 @app.get("/")
 async def get_dashboard():
@@ -101,12 +160,16 @@ async def health_check():
 
 
 @app.get("/gtfs-rt/alerts.pb")
-async def gtfs_rt_alerts_feed():
+async def gtfs_rt_alerts_feed(request: Request):
     """Feed GTFS-Realtime (Service Alerts) in formato Protocol Buffers standard.
 
     Proxy trasparente del feed UFFICIALE GTT quando raggiungibile;
     altrimenti ricostruisce il feed dallo snapshot locale.
+    Con rate limit per non far abusare dei feed GTT tramite il nostro proxy.
     """
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_limited(client_ip):
+        return Response(status_code=429, content=b"Too Many Requests")
     try:
         from app.gtfs_rt import fetch_raw_alerts_feed
         raw = await fetch_raw_alerts_feed()

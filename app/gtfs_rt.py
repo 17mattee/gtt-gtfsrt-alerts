@@ -158,14 +158,15 @@ async def fetch_gtt_trip_updates() -> list:
             if not entity.HasField("trip_update"):
                 continue
             tu = entity.trip_update
+            # Il ritardo varia fermata per fermata: si prende l'ULTIMO
+            # StopTimeUpdate con delay = previsione piu' recente e rilevante
+            # (la prossima fermata), MAI la prima fermata gia' passata.
             delay = None
             for stu in tu.stop_time_update:
                 if stu.HasField("arrival") and stu.arrival.HasField("delay"):
                     delay = stu.arrival.delay
-                    break
-                if stu.HasField("departure") and stu.departure.HasField("delay"):
+                elif stu.HasField("departure") and stu.departure.HasField("delay"):
                     delay = stu.departure.delay
-                    break
             # Standard GTFS-RT: trip tracciato senza campo delay = corsa che
             # sta rispettando l'orario programmato. Il ritardo e' quindi SEMPRE
             # disponibile per ogni corsa attiva (mai 'n/d').
