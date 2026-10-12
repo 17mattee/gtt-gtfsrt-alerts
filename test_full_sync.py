@@ -1,6 +1,8 @@
+import pytest
 import asyncio
 from app.gtt_full_sync import fetch_all_gtt_data
 
+@pytest.mark.anyio
 async def test_sync():
     print("🔍 Avvio test di acquisizione totale (Linee, Veicoli, Ritardi, Avvisi)...")
     data = await fetch_all_gtt_data()
@@ -8,6 +10,7 @@ async def test_sync():
     print(f"  -> Veicoli tracciati: {len(data['vehicles'])}")
     print(f"  -> Aggiornamenti ritardi (Trip Updates): {len(data['trip_updates'])}")
     print(f"  -> Avvisi e deviazioni attive (Alerts): {len(data['alerts'])}")
+    assert isinstance(data, dict)
     print("✅ Sincronizzazione totale completata con successo al 100%!")
 
 if __name__ == "__main__":
