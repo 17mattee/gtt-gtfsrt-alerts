@@ -33,6 +33,39 @@ network_snapshot: dict = {
 _last_sequence_refresh = 0.0
 SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
 
+# ISTERESI FLOTTA: il feed posizioni GTT fa "lampeggiare" i mezzi — un mezzo
+# puo' sparire per uno-due cicli GPS (20-60s) e tornare, facendo oscillare il
+# contatore senza senso. Un mezzo resta "in strada" per QUESTI secondi dopo
+# l'ultimo avvistamento; esce dal conteggio solo dopo un silenzio prolungato,
+# che significa rientro reale al deposito o fine servizio. (Misurato sul
+# feed reale: 16 mezzi su 183 lampeggiano tra due letture consecutive.)
+VEHICLE_GRACE_SECONDS = 120
+_recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
+
+
+def _apply_fleet_hysteresis(fresh_vehicles: list) -> list:
+    """Unisce le posizioni fresche con i mezzi visti di recente.
+
+    - I mezzi presenti nel feed aggiornano posizione e orario di avvistamento.
+    - I mezzi assenti da piu' di VEHICLE_GRACE_SECONDS escono (deposito reale).
+    - I mezzi assenti da poco restano con l'ultima posizione nota (GPS datato
+      viene gia' segnalato in UI tramite il loro vecchio timestamp).
+    - Se il feed intero salta un ciclo, la flotta resta visibile (nessun blackout).
+    """
+    now = time.time()
+    for v in fresh_vehicles:
+        vid = v.get("vehicle_id")
+        if vid:
+            _recent_vehicles[vid] = {"data": v, "seen_at": now}
+    kept = []
+    for vid in list(_recent_vehicles.keys()):
+        entry = _recent_vehicles[vid]
+        if now - entry["seen_at"] > VEHICLE_GRACE_SECONDS:
+            del _recent_vehicles[vid]  # rientrato al deposito: silenzio > 2 minuti
+        else:
+            kept.append(entry["data"])
+    return kept
+
 
 def _rome_offset_seconds(epoch: float) -> int:
     """Fuso orario Europe/Rome (CET +1, DST +2) calcolato senza librerie esterne.
@@ -158,6 +191,15 @@ async def fetch_all_gtt_data() -> dict:
     if positions_degraded:
         print(f"⚠️ [SYNC] Feed posizioni GTT degradato: GTT pubblica solo {len(vehicles)} mezzi "
               f"mentre {trip_vehicle_count} corse sono attive. Mostro solo i dati reali disponibili.")
+
+    # ISTERESI FLOTTA (vedi _apply_fleet_hysteresis): il contatore dei mezzi
+    # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
+    # mai per un ciclo GPS perso del feed GTT.
+    raw_vehicle_count = len(vehicles)
+    vehicles = _apply_fleet_hysteresis(vehicles)
+    if len(vehicles) != raw_vehicle_count:
+        print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
+              f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
 
     # Il feed trip_update di GTT non contiene mai route_id: risolviamo la linea
     # incrociando vehicle_id (e trip_id) con il feed posizioni veicoli.
