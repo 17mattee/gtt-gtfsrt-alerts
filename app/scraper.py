@@ -21,7 +21,7 @@ def parse_cause(text: str):
         return gtfs_realtime_pb2.Alert.Cause.DEMONSTRATION
     elif any(k in text_lower for k in ["lavori", "cantier", "manutenzione", "risanamento binari", "scavi"]):
         return gtfs_realtime_pb2.Alert.Cause.CONSTRUCTION
-    elif any(k in text_lower for k in ["concerto", "partita", "stadio", "evento", "mercato", "fiera", "manifestazione podistica", "maratona"]):
+    elif any(k in text_lower for k in ["concerto", "partita", "stadio", "evento", "mercato", "fiera", "maratona"]):
         return gtfs_realtime_pb2.Alert.Cause.OTHER_CAUSE
     elif any(k in text_lower for k in ["incidente", "guasto", "ostacolo"]):
         return gtfs_realtime_pb2.Alert.Cause.ACCIDENT
@@ -50,15 +50,11 @@ def extract_start_time(text: str):
     return int(time.time())
 
 def extract_route_ids(text: str):
-    """Estrae con precisione chirurgica le linee menzionate nell'avviso e le valida tramite gtfs_manager"""
     route_ids = []
-    
-    # Cerca pattern come "Linee 4, 10 e 17B", "Linea 17", "Linee 9, 18, 67 Festiva"
     lines_match = re.search(r"Line[ea]e?\s+([A-Za-z0-9\s,\/\-\.]+?)(?=\s+deviat|\s+soppress|\s+potenziat|\s+intensificat|\s+Causa|\.|$)", text, re.IGNORECASE)
     
     if lines_match:
         raw_lines = lines_match.group(1)
-        # Tokenizza separando per virgola, 'e', slash o trattini
         tokens = re.split(r",|\se\s|\/|\s-\s", raw_lines)
         for tok in tokens:
             clean_tok = tok.strip().strip(".").upper()
@@ -67,7 +63,6 @@ def extract_route_ids(text: str):
                 if validated and validated not in route_ids:
                     route_ids.append(validated)
                     
-    # Fallback di ricerca estesa nel testo per linee isolate menzionate (es. "linea 4")
     if not route_ids:
         potential_lines = re.findall(r"\b(?:linea|linee)\s+([A-Za-z0-9]+)\b", text, re.IGNORECASE)
         for pl in potential_lines:
@@ -84,7 +79,7 @@ def extract_route_ids(text: str):
     reraise=True
 )
 def _request_gtt_page():
-    headers = {"User-Agent": "Mozilla/5.0 (Compatible; GTT-GTFS-RT-Middleware/1.2; +https://github.com/17mattee/gtt-gtfsrt-alerts)"}
+    headers = {"User-Agent": "Mozilla/5.0 (Compatible; GTT-GTFS-RT-Middleware/1.3; +https://github.com/17mattee/gtt-gtfsrt-alerts)"}
     response = requests.get(GTT_RAW_URL, headers=headers, timeout=10)
     response.raise_for_status()
     return response.text
@@ -113,6 +108,11 @@ def fetch_gtt_alerts():
                 "effect": parse_effect(text),
                 "start_time": extract_start_time(text)
             })
+            
+        # Controllo critico di integrità: se la pagina GTT risponde ma non estrae alcun blocco, il layout potrebbe essere cambiato
+        if len(unique_texts) == 0 and len(html_content) > 500:
+            logger.warning("Attenzione: La pagina GTT è stata scaricata ma il parser non ha estratto alcun avviso. Possibile cambio di layout HTML.")
+            send_telegram_alert("⚠️ **GTT Scraper Warning**: La pagina GTT è raggiungibile ma non ha prodotto avvisi. Verificare eventuale cambio di layout HTML.")
 
     except Exception as e:
         error_msg = f"Errore critico nello scraper GTT ottimizzato dopo i retry: {e}"
