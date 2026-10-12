@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import time
@@ -236,6 +238,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     print(f"🔌 [WS] Control Room collegata. Client totali: {len(manager.active_connections)}")
 
+    static_signature = ""
+    first_message = True
     try:
         cycle = 0
         while True:
@@ -251,8 +255,33 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.error("Primo sync fallito (%s): payload di emergenza.", exc)
                     payload = _fallback_payload()
 
+            # Ottimizzazione traffico: le parti DINAMICHE (mezzi, corse, meta)
+            # si inviano a ogni ciclo; le parti STATICHE (avvisi, catalogo,
+            # tipi/colori, ~60KB) solo quando cambiano davvero. Da ~7MB/min
+            # si scende a ~2MB/min per client.
+            dynamic = {
+                "vehicles": payload.get("vehicles", []),
+                "trip_updates": payload.get("trip_updates", []),
+                "meta": payload.get("meta", {}),
+            }
+            static_part = {
+                "alerts": payload.get("alerts", []),
+                "routes_catalog": payload.get("routes_catalog", {}),
+                "route_types": payload.get("route_types", {}),
+                "route_colors": payload.get("route_colors", {}),
+                "route_text_colors": payload.get("route_text_colors", {}),
+            }
             try:
-                await websocket.send_json({"type": "full_network_update", "data": payload})
+                sig = hashlib.md5(json.dumps(static_part, sort_keys=True).encode("utf-8")).hexdigest()
+            except Exception:
+                sig = str(len(static_part.get("alerts", [])))
+            if first_message or sig != static_signature:
+                dynamic["static"] = static_part
+                static_signature = sig
+            first_message = False
+
+            try:
+                await websocket.send_json({"type": "full_network_update", "data": dynamic})
                 meta = payload.get("meta", {})
                 age = int(time.time()) - meta.get("last_update", 0) if meta.get("last_update") else 0
                 print(

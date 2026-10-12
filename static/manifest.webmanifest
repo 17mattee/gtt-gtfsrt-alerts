@@ -1,0 +1,15 @@
+{
+  "name": "GTT Control Room Torino",
+  "short_name": "GTT Control",
+  "description": "Control room in tempo reale della rete GTT di Torino: flotta, ritardi, deviazioni e avvisi.",
+  "lang": "it",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f7f5",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GTT Torino Control Room</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <meta name="theme-color" content="#f7c500">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="GTT Control">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
@@ -356,10 +362,12 @@
         /* ---------- WebSocket ---------- */
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let ws = null, reconnectAttempts = 0;
+        let staticCache = null;
         function connectWebSocket() {
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
             ws.onopen = () => {
                 reconnectAttempts = 0;
+                staticCache = null;  // il primo messaggio riarmera' la cache statica
                 setLive('ok', 'LIVE');
             };
             ws.onclose = () => {
@@ -373,8 +381,14 @@
             ws.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    lastData = message.data || message;
-                    updateUI(lastData);
+                    const data = message.data || message;
+                    // Le parti statiche arrivano solo quando cambiano: si fondono
+                    // con la cache del client (avvisi, catalogo, tipi, colori).
+                    if (data.static) { staticCache = data.static; }
+                    const merged = Object.assign({}, staticCache || {}, data);
+                    delete merged.static;
+                    lastData = merged;
+                    updateUI(merged);
                 } catch (err) { console.error('Errore WebSocket:', err); }
             };
         }

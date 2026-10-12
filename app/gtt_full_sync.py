@@ -273,6 +273,57 @@ async def fetch_all_gtt_data() -> dict:
                 v["headsign"] = fallback_hs
                 break
 
+        # PREVISIONE CALCOLATA: GTT pubblica gli orari d'arrivo assoluti solo
+        # per una parte delle corse. Per tutte le altre, la prossima fermata si
+        # calcola con il metodo standard di previsione: orario programmato
+        # (GTFS-Static) + ritardo ufficiale della corsa. Stesso criterio che
+        # usa il sistema di GTT: nessun dato inventato, solo combinazione dei
+        # due dati ufficiali. Plausibilita' GPS applicata come per le previsioni RT.
+        if not v.get("next_stop") and v.get("delay_seconds") is not None:
+            for tid in (chosen_tid, own_tid):
+                if not tid:
+                    continue
+                corsa_route = gtfs_manager.get_route_short_name(trip_routes.get(tid) or "")
+                if v_route and corsa_route and corsa_route != v_route:
+                    continue
+                seq = trip_sequences.get(tid)
+                if not seq:
+                    continue
+                now = time.time()
+                offset = _rome_offset_seconds(now)
+                # Mezzanotte di Roma in epoch: la mezzanotte locale CEST e' alle
+                # 22:00 UTC del giorno prima, quindi e' a (midnight UTC - offset).
+                base = ((now + offset) // 86400) * 86400 - offset
+                delay = v["delay_seconds"]
+                prediction = None
+                for sched, stop_id in seq:
+                    predicted = base + sched + delay
+                    if predicted >= now - 60:  # tolleranza fermata appena passata
+                        prediction = (predicted, stop_id)
+                        break
+                if prediction:
+                    predicted, stop_id = prediction
+                    minutes = round((predicted - now) / 60)
+                    if 0 <= minutes <= 60:  # la prossima fermata deve essere plausibile
+                        stop = stops_catalog.get(stop_id) or {}
+                        name = stop.get("name") or stop_id
+                        m2 = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", name)
+                        clean_name = m2.group(1).strip() if m2 else name
+                        incoh = False
+                        if stop.get("lat") and stop.get("lon"):
+                            dist = _haversine_meters(v.get("latitude", 0), v.get("longitude", 0), stop["lat"], stop["lon"])
+                            remaining = predicted - now
+                            if dist > 500 and remaining > 0 and (dist / remaining) > 30.0:
+                                incoh = True
+                        v["next_stop"] = {
+                            "name": clean_name,
+                            "arrival_ts": predicted,
+                            "minutes": max(0, minutes),
+                            "incoerente": incoh,
+                            "calcolata": True,
+                        }
+                break  # elabora solo la prima corsa coerente trovata
+
         # PRECISIONE D'ARRIVO: prossima fermata con nome reale (GTFS-Static) e
         # minuti all'arrivo previsti da GTT. Con verifica di coerenza: se il GPS
         # del mezzo e' troppo lontano dalla fermata per arrivarci in tempo, la
