@@ -1,0 +1,19 @@
+# Blueprint Render — deployment gratuito del GTT Middleware
+# https://render.com/docs/blueprint-spec
+#
+# Pubblicazione: https://dashboard.render.com -> New -> Blueprint -> questo repo.
+# Le variabili SUPABASE_URL / SUPABASE_KEY restano opzionali:
+# senza, il servizio funziona comunque in modalita' autonoma.
+
+services:
+  - type: web
+    name: gtt-gtfsrt-alerts
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

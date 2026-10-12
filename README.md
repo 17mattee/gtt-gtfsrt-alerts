@@ -94,6 +94,19 @@ Open **http://127.0.0.1:8000** — the map fills with real vehicles in seconds.
 docker compose up --build
 ```
 
+## Free publishing (Render)
+
+The whole project deploys for free on [Render](https://render.com) (Docker runtime, WebSocket support included):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/select-repo?type=blueprint)
+
+1. Sign up on [render.com](https://render.com) with your GitHub account.
+2. **New → Blueprint** → pick the `17mattee/gtt-gtfsrt-alerts` repository.
+3. Render reads the included [`render.yaml`](render.yaml) automatically (free plan, Frankfurt region, health check on `/health`). Leave `SUPABASE_URL`/`SUPABASE_KEY` empty or fill them to enable persistence.
+4. Deploy: after ~3 minutes you get a public URL like `https://gtt-gtfsrt-alerts.onrender.com`.
+
+Notes: on the free plan the service sleeps after ~15 minutes without traffic and wakes up on the first request — the dashboard's WebSocket auto-reconnect handles this transparently. Alternatives with a free tier: Koyeb, Hugging Face Spaces (Docker).
+
 ## Database (Supabase)
 
 1. Open your Supabase project → **SQL Editor**.

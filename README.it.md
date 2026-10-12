@@ -94,6 +94,19 @@ Apri **http://127.0.0.1:8000** — la mappa si riempie di mezzi reali in pochi s
 docker compose up --build
 ```
 
+## Pubblicazione gratuita (Render)
+
+L'intero progetto si pubblica gratuitamente su [Render](https://render.com) (runtime Docker, WebSocket inclusi):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/select-repo?type=blueprint)
+
+1. Registrati su [render.com](https://render.com) con l'account GitHub.
+2. **New → Blueprint** → scegli la repository `17mattee/gtt-gtfsrt-alerts`.
+3. Render legge automaticamente il file [`render.yaml`](render.yaml) incluso (piano free, regione Francoforte, health check su `/health`). Lascia vuote `SUPABASE_URL`/`SUPABASE_KEY` oppure compilale per attivare la persistenza.
+4. Deploy: dopo ~3 minuti ottieni un URL pubblico tipo `https://gtt-gtfsrt-alerts.onrender.com`.
+
+Note: col piano free il servizio si addormenta dopo ~15 minuti senza traffico e si riattiva alla prima richiesta — la riconnessione automatica WebSocket della dashboard gestisce tutto in modo trasparente. Alternative con piano gratuito: Koyeb, Hugging Face Spaces (Docker).
+
 ## Database (Supabase)
 
 1. Apri il tuo progetto Supabase → **SQL Editor**.
