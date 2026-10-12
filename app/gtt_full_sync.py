@@ -258,6 +258,11 @@ async def fetch_all_gtt_data() -> dict:
         for tid in (chosen_tid, own_tid):
             if not tid:
                 continue
+            # Coerenza linea-corsa anche per il capolinea da sequenza: la corsa
+            # dev'essere della stessa linea del mezzo (difesa preventiva).
+            corsa_route = gtfs_manager.get_route_short_name(trip_routes.get(tid) or "")
+            if v_route and corsa_route and corsa_route != v_route:
+                continue
             seq = trip_sequences.get(tid)
             if seq:
                 v["headsign"] = _terminus_name(seq[-1][1])
