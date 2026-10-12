@@ -1,0 +1,79 @@
+name: Auto-merge dipendenze sicure
+
+# Dipendabot apre le PR; quando la CI completa VERDE su una sua PR,
+# questa PR viene unita automaticamente SOLO se l'aggiornamento e'
+# patch/minor (o un gruppo patch+minor). Le MAJOR restano manuali:
+# un salto di versione principale puo' cambiare API e va rivisto.
+
+on:
+  workflow_run:
+    workflows: ["GTT Middleware CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # Solo se: la CI girava su una PR, e' finita bene, e la PR e' nello stesso repo
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Trova la PR collegata
+        id: find
+        run: |
+          PR_JSON=$(gh api "repos/${{ github.repository }}/pulls?state=open&per_page=100" \
+            --jq ".[] | select(.head.sha == env.HEAD_SHA)")
+          if [ -z "$PR_JSON" ]; then
+            echo "Nessuna PR aperta per questo commit: niente da unire."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          PR_AUTHOR=$(echo "$PR_JSON" | jq -r '.user.login')
+          PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "title=$PR_TITLE" >> "$GITHUB_OUTPUT"
+          if [ "$PR_AUTHOR" != "dependabot[bot]" ]; then
+            echo "PR #$PR_NUMBER non e' di Dependabot ($PR_AUTHOR): unione manuale."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+      - name: Verifica che il salto di versione sia sicuro (patch/minor)
+        if: steps.find.outputs.skip != 'true'
+        id: safe
+        run: |
+          TITLE="${{ steps.find.outputs.title }}"
+          echo "Titolo PR: $TITLE"
+          SAFE=no
+          # PR raggruppata patch+minor: sicura per costruzione (config dependabot)
+          if echo "$TITLE" | grep -qi "group"; then
+            SAFE=yes
+          else
+            # Titoli tipo: "Bump fastapi from 0.110.0 to 0.115.2"
+            # Confronta solo la MAJOR: uguale -> minor/patch, sicuro da unire.
+            FROM_MAJ=$(echo "$TITLE" | grep -oEi 'from [0-9]+(\.[0-9]+)*' | grep -oE '[0-9]+' | head -1)
+            TO_MAJ=$(echo "$TITLE" | grep -oEi 'to [0-9]+(\.[0-9]+)*' | grep -oE '[0-9]+' | head -1)
+            if [ -n "$FROM_MAJ" ] && [ -n "$TO_MAJ" ] && [ "$FROM_MAJ" = "$TO_MAJ" ]; then
+              SAFE=yes
+            fi
+          fi
+          if [ "$SAFE" != "yes" ]; then
+            echo "Aggiornamento MAJOR o non classificabile: PR lasciata per revisione manuale."
+          fi
+          echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
+
+      - name: Unisci la PR (squash)
+        if: steps.find.outputs.skip != 'true' && steps.safe.outputs.safe == 'yes'
+        run: |
+          PR_NUMBER=${{ steps.find.outputs.number }}
+          echo "Auto-unione PR #$PR_NUMBER (CI verde, bump patch/minor)..."
+          gh pr merge "$PR_NUMBER" --repo "${{ github.repository }}" --squash
+          echo "Fatto: merge su main, Render ridistribuira' automaticamente."

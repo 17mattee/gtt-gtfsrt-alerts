@@ -1,7 +1,37 @@
 version: 2
 updates:
+  # Dipendenze Python (requirements.txt / requirements-dev.txt)
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Rome"
     open-pull-requests-limit: 10
+    labels: ["dependencies"]
+    # Patch e minor insieme in un'unica PR: vengono auto-unite dalla CI.
+    # Le versioni MAJOR arrivano come PR singole e restano da approvare a mano.
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # Azioni GitHub usate dai workflow (checkout, setup-python, ...)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Rome"
+    labels: ["dependencies", "github-actions"]
+
+  # Immagine base del Dockerfile (python:3.11-slim)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Rome"
+    labels: ["dependencies", "docker"]
