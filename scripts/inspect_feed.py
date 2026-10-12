@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import httpx
 from google.transit import gtfs_realtime_pb2
 from datetime import datetime

@@ -1,50 +1,142 @@
-cat << 'EOF' > README.md
-# GTT Torino GTFS-RT Enterprise Middleware & Control Room
+# GTT Torino — GTFS-RT Enterprise Middleware & Control Room
 
-> Piattaforma di infomobilità ad alta resilienza per il monitoraggio in tempo reale della rete di trasporto pubblico di Torino (**GTT** - Metropolitana, Tram e Bus).
+**English** | [Italiano](README.it.md)
 
-![CI Status](https://github.com/17mattee/gtt-gtfsrt-alerts/actions/workflows/test.yml/badge.svg)
-![Python Version](https://img.shields.io/badge/python-3.11%252B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+> High-performance real-time infomobility platform for the public transport network of Turin (**GTT** — Metro, Trams, urban and suburban bus lines). Live fleet telemetry, delays, detours and official service alerts, straight from GTT's official open-data feeds.
+
+![CI](https://github.com/17mattee/gtt-gtfsrt-alerts/actions/workflows/ci.yml/badge.svg)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
+![Data CC BY 4.0](https://img.shields.io/badge/data-CC%20BY%204.0-orange)
 
 ---
 
-## 🏗️ Architettura del Sistema
+## What it does
 
-Il sistema adotta un design disaccoppiato basato su standard aperti internazionali (`GTFS-Static` e `GTFS-Realtime` Protocol Buffers):
+- **Live fleet telemetry** — every GTT vehicle on the map (~440 buses/trams/metro in service), GPS position, speed, heading, refreshed every ~5 seconds.
+- **Real delays** — official GTFS-RT Trip Updates, per-trip delay in minutes, joined with the fleet feed to always show the line number.
+- **Detours & service alerts, crystal clear** — every official GTT alert is classified (detour, disruption, stop moved, delay, info), translated to plain Italian, and affected lines are extracted automatically even when GTT only mentions them in the alert text.
+- **215-line catalog** — the complete official route catalog, downloaded dynamically from GTT's GTFS-Static feed and refreshed hourly.
+- **Bullet-proof resilience** — three-level cascade on every data source (official feed → fallback endpoints → portal scraper → local fallback). If GTT changes its website, the map keeps working.
+- **Control Room UI** — dark-mode Leaflet dashboard with color-coded markers (green on time / orange 2–5 min late / red >5 min), live tabs for fleet, delays and alerts, auto-reconnect WebSocket.
+
+## Architecture
 
 ```text
- [ GTT / 5T Feeds ] 
-        │
-        ▼ (Protobuf / HTTP Multi-Endpoint)
-┌───────────────────────────────────────┐
-│     FastAPI & Async Middleware        │
-│  - Auto-Discovery & Fallback Engine   │
-│  - In-Memory Cache & Time-Series DB   │
-└──────────────────┬────────────────────┘
-                   │
-         ┌─────────┴─────────┐
-         ▼                   ▼
-  [ Supabase DB ]     [ WebSocket Stream ]
-  (Relational)        (Leaflet.js UI Map)
+ [ GTT official open-data feeds (aperTO / gtt.to.it) ]
+        │  GTFS-Static (routes) · GTFS-RT protobuf (vehicles, trip updates, alerts)
+        ▼
+ ┌─────────────────────────────────────────────────┐
+ │  FastAPI async middleware                        │
+ │   · single background refresher (~every 2s)     │
+ │   · parallel feed downloads (asyncio.gather)    │
+ │   · TTL caches + multi-endpoint cascades        │
+ │   · XSS-escaped JSON payloads                    │
+ └──────────────┬───────────────────────┬───────────┘
+                ▼                       ▼
+   [ Supabase / PostgreSQL ]    [ WebSocket stream ]
+   4 relational tables           [ Leaflet Control Room ]
+   (see sql/schema.sql)
+```
 
-🚀 Quick Start 
-git clone [https://github.com/17mattee/gtt-gtfsrt-alerts.git](https://github.com/17mattee/gtt-gtfsrt-alerts.git)
+Endpoints:
+
+| Endpoint | Description |
+|---|---|
+| `GET /` | Control Room dashboard (Leaflet dark mode) |
+| `GET /health` | Service health + live counters (vehicles, alerts, trips, routes) |
+| `GET /gtfs-rt/alerts.pb` | Standard GTFS-RT 2.0 protobuf feed (proxy of the official GTT feed) |
+| `WS /ws` | Real-time stream: fleet, delays, alerts, catalog, sources metadata |
+
+## Project structure
+
+```text
+gtt-gtfsrt-alerts/
+├── app/                    # Backend (FastAPI)
+│   ├── main.py             # Server, WebSocket stream, background refresher
+│   ├── gtt_full_sync.py    # Orchestration of all feeds (parallel, never empty)
+│   ├── gtfs_rt.py          # Official GTFS-RT feeds: trip updates + service alerts
+│   ├── vehicles_scraper.py # Vehicle positions + smart fallback fleet
+│   ├── gtfs_static.py      # Route catalog (GTFS-Static) with cache + local fallback
+│   ├── scraper.py          # GTT portal scraper (alerts backup source, circuit breaker)
+│   ├── database.py         # psycopg persistence (alerts history)
+│   ├── database_writer.py # Supabase writer (routes, vehicles, positions, alerts)
+│   ├── notifier.py         # Optional Telegram notifications
+│   └── websocket_manager.py
+├── static/                 # Frontend — Leaflet Control Room dashboard
+├── tests/                  # Pytest suite (unit + integration)
+├── scripts/                # QA audits, feed inspector, load testing (locust)
+├── sql/schema.sql          # Supabase/PostgreSQL schema (idempotent)
+├── .github/workflows/      # CI (pytest), CodeQL security scan
+├── Dockerfile · docker-compose.yml
+├── README.md · README.it.md
+└── CONTRIBUTING.md · CONTRIBUTING.it.md
+```
+
+## Quick start
+
+### Local (Python)
+
+```bash
+git clone https://github.com/17mattee/gtt-gtfsrt-alerts.git
 cd gtt-gtfsrt-alerts
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+Open **http://127.0.0.1:8000** — the map fills with real vehicles in seconds.
+
+### Docker
+
+```bash
 docker compose up --build
+```
 
+## Database (Supabase)
 
-Endpoints API
-GET /: Dashboard interattiva in streaming WebSocket.
-GET /health: Endpoint di controllo stato salute del server.
+1. Open your Supabase project → **SQL Editor**.
+2. Paste the whole content of [`sql/schema.sql`](sql/schema.sql) and run it. The script is idempotent: safe to re-run on top of existing tables (it upgrades them with new columns, constraints and indexes).
+3. Set the environment variables and restart:
 
-WS /ws: Canale di streaming real-time per la telemetria della flotta e le allerte.
+```bash
+export SUPABASE_URL="https://<your-project>.supabase.co"
+export SUPABASE_KEY="<your-service-role-or-anon-key>"
+uvicorn app.main:app --reload
+```
 
+The middleware then stores, at every refresh cycle: the 215-line catalog, fleet vehicles with last-seen, one GPS row per vehicle (time-series), and the full history of alerts/detours — with `category` (`deviazione`, `interruzione`, `ritardo`, ...), Italian cause/effect labels and affected lines.
 
-### Sincronizziamo tutto su GitHub
+### Optional
 
-Eseguiamo il commit finale e carichiamo l'opera d'arte su GitHub:
+| Variable | Effect |
+|---|---|
+| `DATABASE_URL` | Enables psycopg persistence of alerts history |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Sends a Telegram message when the GTT portal changes layout or the scraper fails |
 
-git add .
-git commit -m "feat: add production-ready Leaflet web dashboard, Docker orchestration and world-class documentation"
-git push origin main
+## Tests & QA
+
+```bash
+pytest                                   # unit + integration suite
+python scripts/run_ultimate_check.py     # 5-check live end-to-end audit
+python scripts/run_enterprise_audit.py   # 6-check enterprise audit
+python scripts/run_full_audit.py         # pytest + coverage + pip-audit + live endpoints
+python scripts/inspect_feed.py           # inspect the served GTFS-RT feed
+locust -f scripts/locustfile.py          # load testing
+```
+
+## Data sources & license
+
+- GTFS-Static and GTFS-RT feeds are the official GTT / City of Turin open data (dataset *“Feed GTFS Real-Time trasporti GTT”*, [aperTO](https://aperto.comune.torino.it/dataset/feed-gtfs-real-time-trasporti-gtt)), licensed **CC BY 4.0**.
+- This project code is released under the **MIT license**.
+
+## Resilience design
+
+| Failure | Behaviour |
+|---|---|
+| Official vehicle feed down | Fallback endpoints, then a smart simulated fleet on real Turin lines — the map is never empty |
+| Alerts feed down | Portal HTML scraper (retry + circuit breaker), then default informational alert |
+| GTFS-Static down | 2 mirrors + cached catalog + local 71-line fallback; sync paths never touch the network |
+| GTT changes route-id format | Raw IDs pass through unchanged; labels degrade gracefully |
+| One WebSocket cycle fails | Per-iteration try/except: the loop survives and sends the last valid payload |

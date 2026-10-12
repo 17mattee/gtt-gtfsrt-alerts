@@ -5,16 +5,28 @@ import subprocess
 REQUIRED_FILES = [
     "app/main.py",
     "app/database.py",
+    "app/database_writer.py",
+    "app/gtfs_rt.py",
     "app/gtfs_static.py",
+    "app/gtt_full_sync.py",
     "app/notifier.py",
     "app/scraper.py",
+    "app/vehicles_scraper.py",
+    "app/websocket_manager.py",
+    "static/index.html",
     "tests/test_enterprise.py",
     "tests/test_gtfs_rt.py",
     "tests/test_health.py",
     "tests/test_scraper.py",
+    "tests/test_full_sync.py",
+    "tests/test_ws_client.py",
+    "sql/schema.sql",
     "requirements.txt",
     "pytest.ini",
     "README.md",
+    "README.it.md",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING.it.md",
     ".github/workflows/ci.yml"
 ]
 

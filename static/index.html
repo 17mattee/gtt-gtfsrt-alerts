@@ -3,65 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GTT Torino Control Room | Live Fleet</title>
-    <!-- Leaflet CSS -->
+    <title>GTT Torino Control Room | Live Fleet & Alerts</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background: #0f172a; color: #f8fafc; overflow: hidden; }
         
-        /* Sidebar */
-        aside { width: 380px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; z-index: 1000; }
-        .sidebar-header { padding: 20px; border-bottom: 1px solid #334155; background: #0f172a; }
-        .sidebar-header h1 { font-size: 1.25rem; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
-        .sidebar-header p { font-size: 0.85rem; color: #94a3b8; margin-top: 4px; }
+        aside { width: 440px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; z-index: 1000; box-shadow: 5px 0 15px rgba(0,0,0,0.3); }
+        .sidebar-header { padding: 18px; border-bottom: 1px solid #334155; background: #0f172a; }
+        .sidebar-header h1 { font-size: 1.15rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
+        .sidebar-header p { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; }
         
-        .stats-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 15px 20px; background: #1e293b; border-bottom: 1px solid #334155; }
-        .stat-box { background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #334155; text-align: center; }
-        .stat-box span { display: block; font-size: 1.25rem; font-weight: 700; color: #38bdf8; }
-        .stat-box label { font-size: 0.75rem; color: #94a3b8; }
+        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 15px; background: #1e293b; border-bottom: 1px solid #334155; }
+        .stat-box { background: #0f172a; padding: 10px 6px; border-radius: 8px; border: 1px solid #334155; text-align: center; }
+        .stat-box span { display: block; font-size: 1.3rem; font-weight: 700; color: #38bdf8; }
+        .stat-box.warn span { color: #f59e0b; }
+        .stat-box.danger span { color: #ef4444; }
+        .stat-box label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
 
-        .feed-section { flex: 1; overflow-y: auto; padding: 15px 20px; }
-        .feed-section h3 { font-size: 0.9rem; font-weight: 600; color: #cbd5e1; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .tabs { display: flex; background: #0f172a; border-bottom: 1px solid #334155; }
+        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: #94a3b8; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
+        .tab-btn.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; background: #1e293b; }
+
+        .feed-section { flex: 1; overflow-y: auto; padding: 12px 15px; display: none; }
+        .feed-section.active { display: block; }
         
-        .alert-card { background: #334155; border-left: 4px solid #f59e0b; padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85rem; }
-        .alert-card strong { color: #facc15; display: block; margin-bottom: 2px; }
+        .card { background: #334155; border-left: 4px solid #38bdf8; padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 0.85rem; }
+        .card.alert { border-left-color: #f59e0b; }
+        .card.detour { border-left-color: #a855f7; background: linear-gradient(90deg, rgba(168,85,247,0.18), #334155 55%); }
+        .card.delay-ok { border-left-color: #22c55e; }
+        .card.delay-warn { border-left-color: #f59e0b; }
+        .card.delay-high { border-left-color: #ef4444; }
+        .card strong { color: #f8fafc; display: block; margin-bottom: 3px; font-size: 0.88rem; }
+        .card span { color: #94a3b8; font-size: 0.75rem; }
 
-        /* Map Container */
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; text-transform: uppercase; }
+        .badge.detour { background: #7e22ce; color: #fff; }
+        .badge.delay { background: #b45309; color: #fff; }
+        .badge.stop { background: #dc2626; color: #fff; }
+        .badge.info { background: #1d4ed8; color: #fff; }
+        .badge.other { background: #475569; color: #e2e8f0; }
+
         #map { flex: 1; height: 100%; background: #0b0f19; }
 
-        /* Status Badge */
         .status-indicator { display: inline-block; width: 8px; height: 8px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; }
-        .connection-status { padding: 10px 20px; font-size: 0.8rem; background: #0f172a; border-top: 1px solid #334155; display: flex; align-items: center; gap: 8px; color: #94a3b8; }
+        .connection-status { padding: 11px 15px; font-size: 0.78rem; background: #0f172a; border-top: 1px solid #334155; display: flex; align-items: center; gap: 8px; color: #94a3b8; }
+
+        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(15,23,42,0.92); border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 0.72rem; color: #cbd5e1; }
+        .legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; }
     </style>
 </head>
 <body>
 
     <aside>
         <div class="sidebar-header">
-            <h1><span class="status-indicator"></span> GTT Control Room</h1>
-            <p>Torino Real-Time Public Transport</p>
+            <h1><span class="status-indicator"></span> GTT Torino Control Room</h1>
+            <p>GTT GTFS-RT Live Dashboard & Map — Flotta, posizioni GPS, ritardi e allerte live</p>
         </div>
         
         <div class="stats-container">
             <div class="stat-box">
                 <span id="active-vehicles">0</span>
-                <label>Mezzi Attivi</label>
+                <label>Mezzi in Strada</label>
             </div>
             <div class="stat-box">
-                <span id="active-routes">215</span>
-                <label>Linee Ufficiali</label>
+                <span id="active-alerts">0</span>
+                <label>Avvisi Attivi</label>
+            </div>
+            <div class="stat-box warn">
+                <span id="active-detours">0</span>
+                <label>Deviazioni</label>
+            </div>
+            <div class="stat-box warn">
+                <span id="delayed-trips">0</span>
+                <label>Corse in Ritardo</label>
+            </div>
+            <div class="stat-box">
+                <span id="active-routes">0</span>
+                <label>Linee Catalogate</label>
+            </div>
+            <div class="stat-box">
+                <span id="last-update" style="font-size:1rem;">--:--:--</span>
+                <label>Ultimo Update</label>
             </div>
         </div>
 
-        <div class="feed-section">
-            <h3>Avvisi e Deviazioni (Service Alerts)</h3>
-            <div id="alerts-container">
-                <div class="alert-card">
-                    <strong>Nessuna allerta critica</strong>
-                    La rete GTT è regolare su tutte le linee urbane e metropolitane.
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('vehicles-tab', this)">Flotta Live</button>
+            <button class="tab-btn" onclick="switchTab('delays-tab', this)">Ritardi</button>
+            <button class="tab-btn" onclick="switchTab('alerts-tab', this)">Avvisi & Deviazioni</button>
+        </div>
+
+        <div id="vehicles-tab" class="feed-section active">
+            <div id="vehicles-list">
+                <div class="card"><strong>Caricamento flotta in corso...</strong><span>Attendere la sincronizzazione GPS con Torino.</span></div>
+            </div>
+        </div>
+
+        <div id="delays-tab" class="feed-section">
+            <div id="delays-list">
+                <div class="card"><strong>Caricamento ritardi...</strong><span>Sincronizzazione con i Trip Updates ufficiali GTT.</span></div>
+            </div>
+        </div>
+
+        <div id="alerts-tab" class="feed-section">
+            <div id="alerts-list">
+                <div class="card alert">
+                    <strong>Caricamento avvisi...</strong>
+                    <span>Ricezione Service Alerts ufficiali GTT in tempo reale.</span>
                 </div>
             </div>
         </div>
@@ -73,95 +124,203 @@
 
     <div id="map"></div>
 
-    <!-- Leaflet JS -->
+    <div class="legend">
+        <div><span class="dot" style="background:#22c55e;"></span> In orario</div>
+        <div><span class="dot" style="background:#f59e0b;"></span> Ritardo 2-5 min</div>
+        <div><span class="dot" style="background:#ef4444;"></span> Ritardo &gt; 5 min</div>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Inizializzazione mappa centrata su Torino
-        const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 13);
+        const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 12);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Dark tile layer pulito (CartoDB Dark Matter)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; <a href="https://carto.com/">CARTO</a> | Dati GTT Torino'
+            attribution: '&copy; OpenStreetMap contributors | GTT Torino'
         }).addTo(map);
 
         let markersLayer = L.layerGroup().addTo(map);
-        let ws;
+
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.feed-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+        }
+
+        // Protezione XSS: tutti i dati esterni (feed GTT) vengono escapati prima del rendering.
+        function esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let ws = null;
+        let reconnectAttempts = 0;
 
         function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-            
-            ws = new WebSocket(wsUrl);
-            const statusEl = document.getElementById('ws-status');
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
             ws.onopen = () => {
-                statusEl.innerHTML = '<span class="status-indicator" style="background:#22c55e; box-shadow: 0 0 8px #22c55e;"></span> Connesso al WebSocket Live';
+                reconnectAttempts = 0;
+                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#22c55e;"></span> Connesso al flusso in tempo reale';
             };
+
+            ws.onclose = () => {
+                const delay = Math.min(3000 * (reconnectAttempts + 1), 15000);
+                document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#f59e0b;"></span> Riconnessione automatica tra ' + (delay / 1000) + 's...';
+                reconnectAttempts++;
+                setTimeout(connectWebSocket, delay);
+            };
+
+            ws.onerror = () => ws.close();
 
             ws.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    if (message.type === 'full_network_update' || message.data) {
-                        const data = message.data || message;
-                        updateDashboard(data);
-                    }
+                    const data = message.data || message;
+                    updateUI(data);
                 } catch (err) {
-                    console.error("Errore parsing WebSocket:", err);
+                    console.error("Errore WebSocket:", err);
                 }
-            };
-
-            ws.onclose = () => {
-                statusEl.innerHTML = '<span class="status-indicator" style="background:#ef4444; box-shadow: 0 0 8px #ef4444;"></span> Connessione persa. Riconnessione...';
-                setTimeout(connectWebSocket, 3000);
             };
         }
+        connectWebSocket();
 
-        function updateDashboard(data) {
-            markersLayer.clearLayers();
-            
-            const vehicles = data.vehicles || [];
-            document.getElementById('active-vehicles').innerText = vehicles.length;
+        function fmtDelay(seconds) {
+            if (seconds == null) return 'n/d';
+            const min = Math.round(Math.abs(seconds) / 60);
+            if (seconds < 0) return min + ' min in anticipo';
+            return min + ' min';
+        }
 
-            vehicles.forEach(v => {
-                if (v.latitude && v.longitude) {
-                    const markerHtml = `<div style="background: #38bdf8; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 6px #38bdf8;"></div>`;
-                    const customIcon = L.divIcon({
-                        className: 'custom-vehicle-marker',
-                        html: markerHtml,
-                        iconSize: [14, 14]
-                    });
+        function delayClass(seconds) {
+            if (seconds == null) return 'delay-ok';
+            if (seconds <= 120) return 'delay-ok';
+            if (seconds <= 300) return 'delay-warn';
+            return 'delay-high';
+        }
 
-                    const marker = L.marker([v.latitude, v.longitude], { icon: customIcon });
-                    marker.bindPopup(`
-                        <div style="color: #0f172a; font-family: 'Inter', sans-serif;">
-                            <strong>Linea: ${v.route_id}</strong><br>
-                            Veicolo ID: ${v.vehicle_id}<br>
-                            Velocità: ${(v.speed * 3.6).toFixed(1)} km/h
-                        </div>
-                    `);
-                    markersLayer.addLayer(marker);
-                }
-            });
+        function delayColor(seconds) {
+            if (seconds == null || seconds <= 120) return '#22c55e';
+            if (seconds <= 300) return '#f59e0b';
+            return '#ef4444';
+        }
 
-            // Aggiorna allerte se presenti
-            const alerts = data.alerts || [];
-            const alertsContainer = document.getElementById('alerts-container');
-            if (alerts.length > 0) {
-                alertsContainer.innerHTML = '';
-                alerts.forEach(al => {
-                    alertsContainer.innerHTML += `
-                        <div class="alert-card">
-                            <strong>Linea ${al.affected_routes.join(', ') || 'Generale'}</strong>
-                            ${al.header}
-                        </div>
-                    `;
-                });
+        function categoryBadge(al) {
+            switch (al.category) {
+                case 'deviazione': return '<span class="badge detour">Deviazione</span>';
+                case 'ritardo': return '<span class="badge delay">Ritardi</span>';
+                case 'interruzione': return '<span class="badge stop">Interruzione</span>';
+                case 'fermata_spostata': return '<span class="badge stop">Fermata spostata</span>';
+                case 'servizio_ridotto': return '<span class="badge delay">Servizio ridotto</span>';
+                default: return '<span class="badge info">Info</span>';
             }
         }
 
-        connectWebSocket();
+        function updateUI(data) {
+            const vehicles = data.vehicles || [];
+            const alerts = data.alerts || [];
+            const tripUpdates = data.trip_updates || [];
+            const routesCatalog = data.routes_catalog || {};
+            const meta = data.meta || {};
+
+            // Ritardo per corsa, agganciato ai mezzi via trip_id.
+            const delaysByTrip = {};
+            tripUpdates.forEach(tu => { if (tu.trip_id) delaysByTrip[tu.trip_id] = tu.delay_seconds; });
+
+            // --- Statistiche generali ---
+            const detours = alerts.filter(al => al.category === 'deviazione').length;
+            const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds > 120).length;
+            const live = meta.vehicles_source === 'live';
+            const simulated = meta.vehicles_source === 'simulated' || meta.vehicles_source === 'snapshot';
+
+            document.getElementById('active-vehicles').innerText = vehicles.length;
+            document.getElementById('active-alerts').innerText = alerts.length;
+            document.getElementById('active-detours').innerText = detours;
+            document.getElementById('delayed-trips').innerText = delayedTrips;
+            document.getElementById('active-routes').innerText = Object.keys(routesCatalog).length;
+            document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT');
+
+            document.getElementById('ws-status').innerHTML = '<span class="status-indicator" style="background:#22c55e;"></span> ' +
+                (live ? 'Streaming LIVE dai feed ufficiali GTT (' + vehicles.length + ' mezzi reali)' :
+                 (simulated ? 'Streaming attivo (modalità smart-fallback GTT)' : 'Streaming attivo'));
+
+            // --- Mappa: marker colorati per stato di ritardo ---
+            markersLayer.clearLayers();
+            const markerFrag = document.createDocumentFragment();
+            const markerHtml = (color) => `<div style="background:${color}; width:13px; height:13px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 6px ${color};"></div>`;
+
+            for (const v of vehicles) {
+                const lat = Number(v.latitude || 0);
+                const lon = Number(v.longitude || 0);
+                if (!lat || !lon) continue;
+
+                const delay = delaysByTrip[v.trip_id];
+                const color = delayColor(delay);
+                const icon = L.divIcon({ className: 'veh-icon', html: markerHtml(color), iconSize: [13, 13] });
+                const marker = L.marker([lat, lon], { icon });
+                marker.bindPopup(
+                    '<div style="color:#0f172a;font-family:Inter,sans-serif;">' +
+                    '<strong>Linea ' + esc(v.route_id) + '</strong><br>' +
+                    'ID Mezzo: ' + esc(v.vehicle_id) + '<br>' +
+                    'Velocità: ' + (Number(v.speed || 0) * 3.6).toFixed(1) + ' km/h<br>' +
+                    'Ritardo corsa: ' + fmtDelay(delay) + '<br>' +
+                    'Trip ID: ' + esc(v.trip_id) +
+                    '</div>'
+                );
+                markersLayer.addLayer(marker);
+            }
+
+            // --- Lista flotta (rendering in un'unica operazione DOM) ---
+            const vehList = vehicles.slice(0, 120).map(v => {
+                const delay = delaysByTrip[v.trip_id];
+                return `<div class="card ${delayClass(delay)}">
+                    <strong>Linea ${esc(v.route_id)} — Mezzo #${esc(v.vehicle_id)}</strong>
+                    <span>Vel: ${(Number(v.speed || 0) * 3.6).toFixed(1)} km/h · Ritardo: ${fmtDelay(delay)}</span>
+                </div>`;
+            }).join('');
+            document.getElementById('vehicles-list').innerHTML = vehList ||
+                '<div class="card"><strong>Nessun veicolo attivo</strong><span>Impossibile recuperare posizioni al momento.</span></div>';
+
+            // --- Lista ritardi: prima le peggiori, solo corse con dato di ritardo ---
+            const withDelay = tripUpdates.filter(tu => tu.delay_seconds != null)
+                .sort((a, b) => b.delay_seconds - a.delay_seconds);
+            document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 120).map(tu => {
+                const d = tu.delay_seconds;
+                return `<div class="card ${delayClass(d)}">
+                    <strong>Linea ${esc(tu.route_id)} — Corsa ${esc(tu.trip_id)}</strong>
+                    <span>Ritardo: ${fmtDelay(d)}${tu.vehicle_id ? ' · Mezzo #' + esc(tu.vehicle_id) : ''}</span>
+                </div>`;
+            }).join('') :
+                '<div class="card delay-ok"><strong>Nessun ritardo segnalato</strong><span>Le corse monitorate rispettano gli orari ufficiali GTT.</span></div>';
+
+            // --- Avvisi: DEVIAZIONI PRIMA, spiegazione massimamente chiara ---
+            const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
+            const sorted = alerts.slice().sort((a, b) =>
+                (order[a.category] ?? 9) - (order[b.category] ?? 9));
+
+            document.getElementById('alerts-list').innerHTML = sorted.length ? sorted.map(al => {
+                const routes = (al.affected_routes || []).join(', ');
+                const isDetour = al.category === 'deviazione';
+                const effectTxt = al.effect_label || '';
+                const causeTxt = al.cause_label || '';
+                let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
+                if (isDetour) {
+                    line += `<strong>DEVIATIONE DI PERCORSO — Linea ${esc(routes || 'rete')}</strong>
+                             <span style="display:block;color:#e9d5ff;font-weight:600;margin:2px 0;">Il percorso della linea e' MODIFICATO: il mezzo segue un itinerario alternativo. ${esc(effectTxt)}</span>`;
+                } else {
+                    line += `<strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>`;
+                }
+                line += `<span style="display:block;">${esc(al.header)}</span>`;
+                if (al.description) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
+                line += `<span style="display:block;margin-top:3px;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span></div>`;
+                return line;
+            }).join('') :
+                '<div class="card alert"><strong>Nessuna interruzione critica</strong><span>La rete GTT risulta regolare su tutte le linee urbane e metropolitane.</span></div>';
+        }
     </script>
 </body>
 </html>

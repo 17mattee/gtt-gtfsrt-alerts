@@ -2,4 +2,9 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 gtfs_data/
+*.log
+.env

@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 import psycopg
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
