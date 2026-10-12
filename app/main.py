@@ -92,12 +92,15 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- Sicurezza: header di risposta + CSP contro XSS/clickjacking/injection ---
+# NB: il jolly *.tile.openstreetmap.org NON copre il dominio esatto: entrambi
+# vanno elencati, altrimenti Safari/Chrome bloccano le tiles della mappa.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' https://unpkg.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
     "font-src https://fonts.gstatic.com; "
-    "img-src 'self' data: https://*.tile.openstreetmap.org https://services.arcgisonline.com; "
+    "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
+    "https://services.arcgisonline.com https://*.arcgisonline.com; "
     "connect-src 'self' ws: wss:"
 )
 

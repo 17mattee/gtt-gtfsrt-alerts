@@ -180,10 +180,21 @@
         L.control.scale({ imperial: false }).addTo(map);
 
         // Mappa SEMPRE leggibile: tile OpenStreetMap standard in ogni tema.
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap | Dati GTT (CC BY 4.0)'
         }).addTo(map);
+
+        // Diagnostica: se le tiles non caricano (rete, blocker, CSP), la barra di
+        // stato lo dice esplicitamente invece di lasciare la mappa muta.
+        let tileErrors = 0;
+        tileLayer.on('tileerror', () => {
+            tileErrors++;
+            if (tileErrors === 3) {
+                const bar = document.getElementById('ws-status');
+                bar.innerHTML = '⚠️ Le tiles della mappa non si caricano: controlla la connessione o un eventuale blocco delle immagini di tile.openstreetmap.org.';
+            }
+        });
 
         let markersLayer = L.layerGroup().addTo(map);
         let lastData = null;
