@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from google.transit import gtfs_realtime_pb2
 from app.gtfs_static import gtfs_manager
 from app.scraper import fetch_gtt_alerts
-from app.database import save_alerts_to_db
+from app.database import save_alerts_to_db, fetch_latest_alerts_from_db
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -30,12 +30,20 @@ async def lifespan(app: FastAPI):
     gtfs_manager._ensure_data_loaded()
     
     global ALERTS_DATA_CACHE
-    logger.info("Primo avvio scraping GTT...")
+    logger.info("Primo avvio scraping GTT (Cold Start Resilience)...")
+    
     initial_alerts = fetch_gtt_alerts()
     if initial_alerts:
         with cache_lock:
             ALERTS_DATA_CACHE = initial_alerts
         save_alerts_to_db(initial_alerts)
+    else:
+        logger.warning("Scraping iniziale fallito o vuoto. Tentativo di recupero dallo storico Supabase...")
+        fallback_alerts = fetch_latest_alerts_from_db()
+        if fallback_alerts:
+            with cache_lock:
+                ALERTS_DATA_CACHE = fallback_alerts
+            logger.info(f"Ripristinati {len(fallback_alerts)} avvisi dallo storico Supabase con successo.")
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(job_update_alerts, 'interval', minutes=2)
@@ -57,8 +65,8 @@ def job_update_alerts():
 
 app = FastAPI(
     title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise ad alta affidabilità con Gzip, Thread Locking, Health Check e Storico Supabase.",
-    version="1.2.0",
+    description="Middleware enterprise ad alta affidabilità con Cold Start Resiliency, Gzip e Thread Locking.",
+    version="1.3.0",
     lifespan=lifespan
 )
 
@@ -91,7 +99,7 @@ def dashboard(request: Request):
     </head>
     <body>
         <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">PRODUCTION READY</span></h1>
+            <h1>GTT GTFS-RT Middleware <span class="badge">V1.3 RESILIENT</span></h1>
             <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
             
             <h3>Endpoint Ufficiali:</h3>
@@ -99,11 +107,11 @@ def dashboard(request: Request):
             <div class="endpoint">GET <a href="/health" style="color: #38bdf8; text-decoration: none;">/health</a> (Health Check)</div>
             
             <h3>Stato Attuale:</h3>
-            <p>Avvisi attivi processati in memoria: <strong>{cache_len}</strong></p>
+            <p>Avvisi attivi in cache (con Cold Start di sicurezza): <strong>{cache_len}</strong></p>
             
-            <h3>Ottomizzazioni Architetturali:</h3>
+            <h3>Ottimizzazioni Architetturali:</h3>
             <ul>
-                <li><strong>Health Check Avanzato:</strong> Diagnostica DB e Cache</li>
+                <li><strong>Cold Start Resiliency:</strong> Ricarica automatica da DB in caso di down temporaneo</li>
                 <li><strong>Gzip Compression & Thread Locking:</strong> Attivi</li>
                 <li><strong>Rate Limiting & Retries:</strong> Attivi e protetti</li>
                 <li><strong>Persistence:</strong> Storico PostgreSQL permanente su Supabase</li>

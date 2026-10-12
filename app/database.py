@@ -28,6 +28,7 @@ def save_alerts_to_db(alerts: list):
                         """
                         INSERT INTO gtt_alerts_history (alert_id, title, description, route_ids, cause, effect, start_time)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
                         """,
                         (
                             alert["id"],
@@ -44,3 +45,39 @@ def save_alerts_to_db(alerts: list):
     except Exception as e:
         logger.error(f"Errore durante il salvataggio su Supabase: {e}")
         raise
+
+def fetch_latest_alerts_from_db(limit: int = 50):
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return []
+
+    alerts = []
+    try:
+        with psycopg.connect(database_url, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT alert_id, title, description, route_ids, cause, effect, start_time
+                    FROM gtt_alerts_history
+                    ORDER BY start_time DESC
+                    LIMIT %s
+                    """,
+                    (limit,)
+                )
+                rows = cur.fetchall()
+                for row in rows:
+                    alert_id, title, description, route_ids, cause, effect, start_time = row
+                    alerts.append({
+                        "id": alert_id,
+                        "title": title,
+                        "description": description,
+                        "route_ids": route_ids if isinstance(route_ids, list) else [],
+                        "cause": int(cause) if cause and str(cause).isdigit() else 1,
+                        "effect": int(effect) if effect and str(effect).isdigit() else 1,
+                        "start_time": int(start_time.timestamp()) if isinstance(start_time, datetime) else int(time.time())
+                    })
+        logger.info(f"Recuperati {len(alerts)} avvisi di backup dal database Supabase (Cold Start).")
+    except Exception as e:
+        logger.error(f"Impossibile recuperare lo storico da Supabase durante il cold start: {e}")
+    
+    return alerts
