@@ -148,12 +148,12 @@ def _rate_limited(client_ip: str) -> bool:
     return False
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def get_dashboard():
     return FileResponse("static/index.html")
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
     snapshot = get_network_snapshot()
     return {
