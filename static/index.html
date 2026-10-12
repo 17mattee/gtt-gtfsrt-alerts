@@ -6,7 +6,7 @@
     <title>GTT Torino Control Room</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="apple-touch-icon" href="/static/icon-180.png">
     <meta name="theme-color" content="#f7c500">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="GTT Control">
@@ -616,9 +616,21 @@
             if (!lastData) return;
             const routesCatalog = lastData.routes_catalog || {};
             const query = (document.getElementById('fleet-filter').value || '').trim().toLowerCase();
-            const vehicles = (lastData.vehicles || [])
-                .filter(v => !selectedLine || v.route_id === selectedLine)
-                .filter(v => !query || String(v.route_id).toLowerCase().includes(query) || String(v.vehicle_id).toLowerCase().includes(query));
+            const all = (lastData.vehicles || [])
+                .filter(v => !selectedLine || v.route_id === selectedLine);
+            let vehicles;
+            if (!query) {
+                vehicles = all;
+            } else {
+                const exactLine = all.filter(v => String(v.route_id).toLowerCase() === query);
+                if (exactLine.length) {
+                    vehicles = exactLine;
+                } else {
+                    const byVehicle = all.filter(v => String(v.vehicle_id).toLowerCase().includes(query));
+                    vehicles = byVehicle.length ? byVehicle
+                        : all.filter(v => String(v.route_id).toLowerCase().includes(query));
+                }
+            }
 
             const byRoute = {};
             vehicles.forEach(v => { const k = v.route_id || 'N/A'; (byRoute[k] = byRoute[k] || []).push(v); });
@@ -633,7 +645,7 @@
             for (const key of routeKeys) {
                 const group = byRoute[key];
                 const longName = routesCatalog[key];
-                html += `<div class="line-group-title">${lineBadge(key)} <span>${esc(fmtVehicleType(key))} · ${group.length} mezzi</span>${longName ? `<span class="route-name">${esc(longName)}</span>` : ''}</div>`;
+                html += `<div class="line-group-title">${lineBadge(key)} <span>${esc(fmtVehicleType(key))} · ${group.length} ${group.length === 1 ? 'mezzo' : 'mezzi'}</span>${longName ? `<span class="route-name">${esc(longName)}</span>` : ''}</div>`;
                 for (const v of group) {
                     if (shown >= 300) break;
                     shown++;

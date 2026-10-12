@@ -133,12 +133,5 @@ ORDER BY vehicle_id, recorded_at DESC;
 -- ---------------------------------------------------------------------------
 -- 6. RETENTION (opzionale, consigliato per le time-series):
 --    cron giornaliero che cancella le posizioni più vecchie di 30 giorni.
---    Richiede l'estensione pg_cron (attivabile in Supabase: Database > Extensions).
+--    Versione PRONTA e ATTIVA in sql/retention.sql (richiede pg_cron).
 -- ---------------------------------------------------------------------------
--- CREATE EXTENSION IF NOT EXISTS pg_cron;
--- SELECT cron.schedule(
---     'gtt-positions-retention',
---     '0 3 * * *',
---     $$DELETE FROM public.gtt_vehicle_positions
---       WHERE recorded_at < now() - INTERVAL '30 days'$$
--- );
