@@ -326,8 +326,14 @@
         }
 
         // Selettore linee raggruppato per tipo UFFICIALE: metro, tram, funicolare, bus.
+        let _chipsSignature = '';
         function renderLinesPanel() {
             if (!lastData) return;
+            // Evita re-render inutili ogni 2s (flicker/click mancati): ridisegna
+            // solo se le linee attive o la selezione sono cambiate.
+            const sig = (lastData.vehicles || []).map(v => v.route_id).join(',') + '|' + selectedLine + '|' + (lastData.vehicles || []).length;
+            if (sig === _chipsSignature) return;
+            _chipsSignature = sig;
             const counts = {};
             (lastData.vehicles || []).forEach(v => {
                 const key = v.route_id || 'N/A';
@@ -503,10 +509,13 @@
 
             const degraded = meta.positions_degraded;
             const unavailable = meta.vehicles_source === 'unavailable';
+            const delaysDown = meta.trip_updates_source === 'unavailable';
             document.getElementById('ws-status').innerHTML = unavailable
                 ? '<span class="live-dot" style="background:#dc2626;"></span> Feed posizioni GTT non raggiungibile in questo momento: appena GTT riprende a trasmettere la mappa si repopola da sola.'
                 : degraded
                 ? '<span class="live-dot" style="background:#d97706;"></span> Feed posizioni GTT in manutenzione: mostra solo i mezzi realmente trasmessi (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse attive.'
+                : delaysDown
+                ? '<span class="live-dot" style="background:#d97706;"></span> Feed ritardi GTT non disponibile: i ritardi tornano appena GTT riprende a trasmetterle.'
                 : '<span class="live-dot on"></span> ' +
                 (live ? 'LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
                  'Streaming attivo');

@@ -214,7 +214,13 @@ class GtfsStaticManager:
             return dict(FALLBACK_ROUTES)
 
     async def _download_routes(self) -> dict:
-        for url in GTFS_STATIC_URLS:
+        # Mirror noti + URL auto-scoperto dal catalogo open-data (a prova di futuro).
+        from app.feed_registry import get_feed_urls
+        mirrors = []
+        for url in get_feed_urls().get("static", []) + GTFS_STATIC_URLS:
+            if url not in mirrors:
+                mirrors.append(url)
+        for url in mirrors:
             try:
                 async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                     response = await client.get(url)

@@ -130,6 +130,14 @@ RATE_LIMIT_PER_MINUTE = 60
 def _rate_limited(client_ip: str) -> bool:
     now = time.time()
     window = _rate_buckets.setdefault(client_ip, [])
+    # Anti memory-leak: se il dizionario cresce troppo (attacco da molti IP),
+    # ripulisce le finestre scadute di tutti.
+    if len(_rate_buckets) > 5000:
+        for ip in list(_rate_buckets):
+            bucket = _rate_buckets[ip]
+            bucket[:] = [t for t in bucket if now - t < 60]
+            if not bucket:
+                _rate_buckets.pop(ip, None)
     window[:] = [t for t in window if now - t < 60]
     if len(window) >= RATE_LIMIT_PER_MINUTE:
         return True

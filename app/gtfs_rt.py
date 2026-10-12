@@ -17,13 +17,36 @@ import time
 import httpx
 from google.transit import gtfs_realtime_pb2
 
+from app.feed_registry import get_feed_urls
 from app.gtfs_static import gtfs_manager
 
 logger = logging.getLogger("GTT-Realtime")
 
 GTFS_RT_BASE = "https://percorsieorari.gtt.to.it/das_gtfsrt"
-TRIP_UPDATE_URL = f"{GTFS_RT_BASE}/trip_update.aspx"
-ALERTS_URL = f"{GTFS_RT_BASE}/alerts.aspx"
+BASE_TRIP_UPDATE_URL = f"{GTFS_RT_BASE}/trip_update.aspx"
+BASE_ALERTS_URL = f"{GTFS_RT_BASE}/alerts.aspx"
+
+
+def _trip_update_urls() -> list:
+    """URL trip updates: prima quelli auto-scoperti dal catalogo open-data."""
+    discovered = get_feed_urls().get("trip_updates", [])
+    seen, ordered = set(), []
+    for url in discovered + [BASE_TRIP_UPDATE_URL]:
+        if url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    return ordered
+
+
+def _alerts_urls() -> list:
+    """URL service alerts: prima quelli auto-scoperti dal catalogo open-data."""
+    discovered = get_feed_urls().get("alerts", [])
+    seen, ordered = set(), []
+    for url in discovered + [BASE_ALERTS_URL]:
+        if url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    return ordered
 
 # Sorgente dell'ultimo fetch riuscito per ogni feed.
 last_trip_updates_source = "unknown"
@@ -33,6 +56,7 @@ last_alerts_source = "unknown"
 # lungo da non sovraccaricare i server GTT con richieste inutili.
 ALERTS_CACHE_TTL = 20
 _alerts_cache = {"data": None, "fetched_at": 0.0}
+_raw_alerts_cache = {"data": b"", "fetched_at": 0.0}
 
 # Traduzione in italiano delle cause GTFS-RT (spec Google Transit).
 CAUSE_LABELS = {
@@ -136,14 +160,24 @@ async def _fetch_feed(url: str, timeout: float = 8.0):
 
 
 async def fetch_raw_alerts_feed() -> bytes:
-    """Byte grezzi del feed alerts ufficiale (per il proxy /gtfs-rt/alerts.pb). Vuoto se offline."""
-    try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            response = await client.get(ALERTS_URL)
-        if response.status_code == 200 and b"<html" not in response.content[:200].lower():
-            return response.content
-    except Exception as exc:
-        logger.warning("Feed alerts ufficiale non raggiungibile: %s", exc)
+    """Byte grezzi del feed alerts ufficiale (per il proxy /gtfs-rt/alerts.pb).
+
+    Con cache TTL di 20s: richieste ravvicinate di client diversi non
+    generano altrettante chiamate verso i server GTT. Vuoto se offline.
+    """
+    cached = _raw_alerts_cache["data"]
+    if cached and (time.time() - _raw_alerts_cache["fetched_at"]) < ALERTS_CACHE_TTL:
+        return cached
+    for url in _alerts_urls():
+        try:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                response = await client.get(url)
+            if response.status_code == 200 and b"<html" not in response.content[:200].lower():
+                _raw_alerts_cache["data"] = response.content
+                _raw_alerts_cache["fetched_at"] = time.time()
+                return response.content
+        except Exception as exc:
+            logger.warning("Feed alerts ufficiale non raggiungibile (%s): %s", url, exc)
     return b""
 
 
@@ -151,7 +185,11 @@ async def fetch_gtt_trip_updates() -> list:
     """Trip Updates reali GTT: ritardi per corsa. Restituisce una lista di dict, mai eccezioni."""
     global last_trip_updates_source
     updates = []
-    feed = await _fetch_feed(TRIP_UPDATE_URL)
+    feed = None
+    for url in _trip_update_urls():
+        feed = await _fetch_feed(url)
+        if feed is not None:
+            break
 
     if feed is not None:
         for entity in feed.entity:
@@ -202,7 +240,11 @@ async def fetch_gtt_rt_alerts() -> list:
         return _alerts_cache["data"]
 
     alerts = []
-    feed = await _fetch_feed(ALERTS_URL)
+    feed = None
+    for url in _alerts_urls():
+        feed = await _fetch_feed(url)
+        if feed is not None:
+            break
 
     if feed is not None:
         for entity in feed.entity:

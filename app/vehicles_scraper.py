@@ -16,17 +16,29 @@ import time
 import httpx
 from google.transit import gtfs_realtime_pb2
 
+from app.feed_registry import get_feed_urls
 from app.gtfs_static import gtfs_manager
 
 logger = logging.getLogger("GTT-Vehicles")
 
-# Endpoint GTFS-RT per le posizioni veicoli (provati in ordine).
-# Il primo e' il feed UFFICIALE GTT pubblicato su aperTO (Comune di Torino).
-GTFS_RT_VEHICLE_ENDPOINTS = [
+# Endpoint di base; in testa vengono aggiunti quelli auto-scoperti dal catalogo
+# open-data (a prova di futuro: se GTT sposta gli URL, il sistema si adatta).
+BASE_GTFS_RT_VEHICLE_ENDPOINTS = [
     "https://percorsieorari.gtt.to.it/das_gtfsrt/vehicle_position.aspx",
     "https://www.gtt.to.it/gtfs-rt/vehicle_positions.pb",
     "https://www.gtt.to.it/gtfs-rt/vehiclepositions.pb",
 ]
+
+
+def _vehicle_endpoints() -> list:
+    """URL posizioni veicoli: prima quelli auto-scoperti, poi quelli noti."""
+    discovered = get_feed_urls().get("vehicle_positions", [])
+    seen, ordered = set(), []
+    for url in discovered + BASE_GTFS_RT_VEHICLE_ENDPOINTS:
+        if url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    return ordered
 
 # Bounding box di validita' dell'intera rete GTT (citta' metropolitana di Torino + extraurbano).
 TURIN_BBOX = {"lat_min": 44.0, "lat_max": 46.0, "lon_min": 6.0, "lon_max": 9.0}
@@ -88,7 +100,7 @@ async def fetch_gtt_vehicle_positions() -> list:
     vehicles = []
     print("🔍 [SCRAPER] Avvio telemetria flotta GTT (GTFS-RT Vehicle Positions)...")
 
-    for url in GTFS_RT_VEHICLE_ENDPOINTS:
+    for url in _vehicle_endpoints():
         try:
             async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
                 response = await client.get(url)
