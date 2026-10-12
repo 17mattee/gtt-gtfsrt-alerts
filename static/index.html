@@ -7,75 +7,91 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --page-bg: #edf0f5; --panel: #ffffff; --panel2: #fafbfd;
+            --border: #dfe4ee; --border2: #edf0f6;
+            --text: #16181d; --text2: #616b7d; --text3: #98a1b2;
+            --accent: #1740c8; --accent-soft: #f0f4ff; --gtt: #f7c500; --gtt-text: #16181d;
+            --card: #ffffff; --chip-bg: #ffffff; --shadow: 0 3px 14px rgba(22,24,29,0.09);
+            --legend-bg: rgba(255,255,255,0.96); --legend-text: #3b4152;
+            --input-bg: #f2f4f9;
+        }
+        body.dark {
+            --page-bg: #0a0f19; --panel: #111a2b; --panel2: #0d1524;
+            --border: #22304c; --border2: #1a2337;
+            --text: #e8ecf4; --text2: #96a2b8; --text3: #66748d;
+            --accent: #6f97ff; --accent-soft: #16233d; --gtt: #f7c500; --gtt-text: #16181d;
+            --card: #152033; --chip-bg: #101a2c; --shadow: 0 3px 14px rgba(0,0,0,0.45);
+            --legend-bg: rgba(17,26,43,0.95); --legend-text: #c3ccdb;
+            --input-bg: #0c1424;
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; }
-        body { display: flex; height: 100vh; background: #eef1f6; color: #0f172a; overflow: hidden; }
+        body { display: flex; height: 100vh; background: var(--page-bg); color: var(--text); overflow: hidden; transition: background 0.2s; }
 
-        aside { width: 470px; background: #ffffff; border-right: 1px solid #dfe4ec; display: flex; flex-direction: column; z-index: 1000; }
+        aside { width: 470px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 1000; }
 
-        .sidebar-header { padding: 16px 18px 14px; border-bottom: 1px solid #eef1f6; display: flex; align-items: center; gap: 12px; }
-        .gtt-logo { background: #f7c500; color: #17181a; font-weight: 800; font-size: 0.95rem; padding: 7px 10px; border-radius: 8px; letter-spacing: 0.02em; flex-shrink: 0; }
-        .sidebar-header h1 { font-size: 1.02rem; font-weight: 800; color: #17181a; line-height: 1.2; letter-spacing: -0.01em; }
-        .sidebar-header p { font-size: 0.72rem; color: #8a93a6; margin-top: 2px; font-weight: 500; }
-        .live-dot { width: 8px; height: 8px; background: #16a34a; border-radius: 50%; margin-left: auto; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(22,163,74,0.15); }
-        @keyframes livepulse { 0%,100% { box-shadow: 0 0 0 3px rgba(22,163,74,0.15);} 50% { box-shadow: 0 0 0 6px rgba(22,163,74,0.08);} }
+        .sidebar-header { padding: 14px 16px; border-bottom: 1px solid var(--border2); display: flex; align-items: center; gap: 11px; background: var(--panel); }
+        .gtt-logo { background: var(--gtt); color: var(--gtt-text); font-weight: 800; font-size: 0.92rem; padding: 7px 9px; border-radius: 8px; flex-shrink: 0; }
+        .sidebar-header h1 { font-size: 1rem; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; }
+        .sidebar-header p { font-size: 0.7rem; color: var(--text2); margin-top: 2px; font-weight: 500; }
+        .live-dot { width: 8px; height: 8px; background: #16a34a; border-radius: 50%; margin-left: auto; flex-shrink: 0; }
+        @keyframes livepulse { 0%,100% { box-shadow: 0 0 0 3px rgba(22,163,74,0.2);} 50% { box-shadow: 0 0 0 6px rgba(22,163,74,0.06);} }
         .live-dot.on { animation: livepulse 2s infinite; }
+        .theme-btn { border: 1px solid var(--border); background: var(--panel2); color: var(--text2); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+        .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .theme-btn svg { width: 16px; height: 16px; }
 
-        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid #eef1f6; background: #fbfcfe; }
-        .stat-box { background: #ffffff; padding: 9px 6px; border-radius: 10px; border: 1px solid #e6eaf2; text-align: center; }
-        .stat-box span { display: block; font-size: 1.3rem; font-weight: 800; color: #17181a; line-height: 1.15; }
-        .stat-box label { font-size: 0.58rem; color: #8a93a6; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-        .stat-box.warn span { color: #b45309; }
-        .stat-box.danger span { color: #b91c1c; }
-        .stat-box.dev span { color: #6d28d9; }
+        .stats-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border2); background: var(--panel2); }
+        .stat-box { background: var(--card); padding: 9px 6px; border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+        .stat-box span { display: block; font-size: 1.3rem; font-weight: 800; line-height: 1.15; }
+        .stat-box label { font-size: 0.58rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+        .stat-box.warn span { color: #b45309; } body.dark .stat-box.warn span { color: #f0b243; }
+        .stat-box.danger span { color: #b91c1c; } body.dark .stat-box.danger span { color: #f27474; }
+        .stat-box.dev span { color: #6d28d9; } body.dark .stat-box.dev span { color: #b794f6; }
 
-        .tabs { display: flex; border-bottom: 1px solid #e6eaf2; background: #fbfcfe; }
-        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: #6b7487; font-weight: 700; font-size: 0.8rem; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
-        .tab-btn.active { color: #17181a; border-bottom: 2px solid #f7c500; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel2); }
+        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: var(--text2); font-weight: 700; font-size: 0.8rem; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+        .tab-btn.active { color: var(--text); border-bottom: 2px solid var(--gtt); }
 
-        /* --- Selettore linee: raggruppato per tipo, tutto a vista --- */
-        .lines-panel { border-bottom: 1px solid #eef1f6; background: #fbfcfe; padding: 10px 14px 12px; }
-        .lines-panel .group-label { font-size: 0.6rem; color: #8a93a6; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin: 8px 0 5px; }
+        .lines-panel { border-bottom: 1px solid var(--border2); background: var(--panel2); padding: 10px 14px 12px; }
+        .lines-panel .group-label { font-size: 0.6rem; color: var(--text2); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin: 9px 0 5px; }
         .chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
-        .chip { border: 1px solid #dde3ee; background: #fff; color: #3b4152; border-radius: 7px; min-width: 36px; height: 27px; padding: 0 8px; font-size: 0.76rem; font-weight: 700; cursor: pointer; transition: all 0.12s; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-        .chip:hover { border-color: #2563eb; color: #1740c8; background: #f0f5ff; }
-        .chip.selected { background: #1740c8; border-color: #1740c8; color: #fff; }
+        .chip { border: 1px solid var(--border); background: var(--chip-bg); color: var(--text); border-radius: 7px; min-width: 36px; height: 27px; padding: 0 8px; font-size: 0.76rem; font-weight: 700; cursor: pointer; transition: all 0.12s; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+        .chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+        .chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
         .chip .tdot { width: 6px; height: 6px; border-radius: 50%; }
-        .chip.tmetro .tdot { background: #f7c500; } .chip.ttram .tdot { background: #16a34a; } .chip.tbus .tdot { background: #2563eb; }
-        .chip.all-chip { background: #17181a; color: #fff; border-color: #17181a; padding: 0 12px; }
-        .chip.all-chip:hover { background: #33363b; }
-        .chip.all-chip.selected { outline: 2px solid #f7c500; outline-offset: 1px; }
+        .chip.all-chip { background: #16181d; color: #fff; border-color: #16181d; padding: 0 12px; }
+        body.dark .chip.all-chip { background: #f7c500; color: #16181d; border-color: #f7c500; }
+        .chip.all-chip.selected { outline: 2px solid var(--gtt); outline-offset: 1px; }
 
-        .filter-bar { padding: 9px 14px; border-bottom: 1px solid #eef1f6; background: #fff; }
-        .filter-bar input { width: 100%; background: #f4f6fa; border: 1px solid #e0e5ef; color: #17181a; border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; outline: none; }
-        .filter-bar input:focus { border-color: #2563eb; background: #fff; }
-        .filter-bar input::placeholder { color: #a3abb9; }
+        .filter-bar { padding: 9px 14px; border-bottom: 1px solid var(--border2); background: var(--panel); }
+        .filter-bar input { width: 100%; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 0.82rem; outline: none; }
+        .filter-bar input:focus { border-color: var(--accent); }
+        .filter-bar input::placeholder { color: var(--text3); }
 
         .feed-section { flex: 1; overflow-y: auto; padding: 12px 14px; display: none; }
         .feed-section.active { display: block; }
         .feed-section::-webkit-scrollbar { width: 8px; }
-        .feed-section::-webkit-scrollbar-thumb { background: #d5dbe7; border-radius: 4px; }
+        .feed-section::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-        .line-group-title { color: #6b7487; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; margin: 12px 2px 7px; display: flex; align-items: center; gap: 6px; }
+        .line-group-title { color: var(--text2); font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; margin: 12px 2px 7px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .line-group-title:first-child { margin-top: 0; }
-        .line-group-title .route-name { color: #9aa3b5; font-weight: 600; text-transform: none; letter-spacing: 0; }
+        .line-group-title .route-name { color: var(--text3); font-weight: 600; text-transform: none; letter-spacing: 0; }
 
-        .card { background: #fff; border: 1px solid #e6eaf2; border-radius: 10px; padding: 9px 11px; margin-bottom: 7px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: box-shadow 0.12s, transform 0.12s; }
-        .card:hover { box-shadow: 0 2px 10px rgba(23,24,26,0.08); transform: translateY(-1px); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; margin-bottom: 7px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: box-shadow 0.12s, transform 0.12s; }
+        .card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
         .card.alert { border-left: 3px solid #d97706; cursor: default; display: block; }
-        .card.detour { border-left: 3px solid #7c3aed; background: linear-gradient(90deg, #faf5ff, #fff 45%); cursor: default; display: block; }
+        .card.detour { border-left: 3px solid #7c3aed; background: linear-gradient(90deg, var(--accent-soft), var(--card) 50%); cursor: default; display: block; }
         .card.delay-ok { border-left: 3px solid #16a34a; }
         .card.delay-warn { border-left: 3px solid #d97706; }
         .card.delay-high { border-left: 3px solid #dc2626; }
-        .card strong { color: #17181a; display: block; font-size: 0.85rem; font-weight: 700; }
-        .card span { color: #6b7487; font-size: 0.75rem; }
+        .card strong { color: var(--text); display: block; font-size: 0.85rem; font-weight: 700; }
+        .card span { color: var(--text2); font-size: 0.75rem; }
 
-        .line-badge { min-width: 42px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.82rem; color: #fff; flex-shrink: 0; padding: 0 6px; }
-        .line-badge.metro { background: #f7c500; color: #17181a; }
-        .line-badge.tram { background: #16a34a; }
-        .line-badge.bus { background: #2563eb; }
-        .line-badge.other { background: #6b7487; }
+        .line-badge { min-width: 42px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.82rem; flex-shrink: 0; padding: 0 6px; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.15); }
 
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.02em; margin-right: 6px; text-transform: uppercase; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.62rem; font-weight: 800; margin-right: 6px; text-transform: uppercase; }
         .badge.detour { background: #7c3aed; color: #fff; }
         .badge.delay { background: #d97706; color: #fff; }
         .badge.stop { background: #dc2626; color: #fff; }
@@ -83,18 +99,28 @@
 
         #map { flex: 1; height: 100%; background: #e8e4d8; }
 
-        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: rgba(255,255,255,0.95); border: 1px solid #e0e5ef; border-radius: 10px; padding: 8px 12px; font-size: 0.72rem; color: #3b4152; box-shadow: 0 3px 12px rgba(23,24,26,0.1); }
+        /* Modalita' scura: la mappa OSM viene invertita elegantemente
+           mantenendo tutte le strade perfettamente leggibili. */
+        body.dark .leaflet-tile { filter: invert(1) hue-rotate(185deg) brightness(0.88) contrast(0.86) saturate(0.6); }
+        body.dark #map { background: #10151f; }
+        .leaflet-bar a { background: var(--panel); color: var(--text) !important; border-color: var(--border) !important; }
+        .leaflet-control-attribution { background: var(--legend-bg) !important; color: var(--text2) !important; }
+        .leaflet-control-attribution a { color: var(--accent) !important; }
+
+        .legend { position: absolute; bottom: 24px; left: 12px; z-index: 900; background: var(--legend-bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 0.72rem; color: var(--legend-text); box-shadow: var(--shadow); }
         .legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
         .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
+        body.dark .dot { border-color: #2a3a58; }
 
-        .connection-status { padding: 10px 16px; font-size: 0.74rem; background: #fbfcfe; border-top: 1px solid #eef1f6; display: flex; align-items: center; gap: 8px; color: #6b7487; font-weight: 600; }
+        .connection-status { padding: 10px 16px; font-size: 0.74rem; background: var(--panel2); border-top: 1px solid var(--border2); display: flex; align-items: center; gap: 8px; color: var(--text2); font-weight: 600; }
 
-        .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 6px 24px rgba(23,24,26,0.16); }
-        .popup-route { font-weight: 800; font-size: 0.95rem; color: #17181a; }
+        .leaflet-popup-content-wrapper { border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: 0 8px 28px rgba(0,0,0,0.22); }
+        .leaflet-popup-tip { background: var(--panel); }
+        .popup-route { font-weight: 800; font-size: 0.95rem; }
         .popup-big-delay { font-size: 1.25rem; font-weight: 800; margin: 4px 0 2px; }
-        .popup-label { color: #8a93a6; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-        .popup-row { color: #3b4152; font-size: 0.8rem; margin-top: 3px; }
-        .popup-alerts { margin-top: 8px; padding-top: 8px; border-top: 1px solid #eef1f6; }
+        .popup-label { color: var(--text2); font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+        .popup-row { color: var(--text2); font-size: 0.8rem; margin-top: 3px; }
+        .popup-alerts { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border2); }
     </style>
 </head>
 <body>
@@ -107,6 +133,7 @@
                 <p>GTT GTFS-RT Live Dashboard & Map — Flotta, ritardi e allerte live</p>
             </div>
             <span class="live-dot" id="live-dot"></span>
+            <button class="theme-btn" id="theme-btn" title="Tema chiaro/scuro" onclick="toggleTheme()"></button>
         </div>
 
         <div class="stats-container">
@@ -184,8 +211,10 @@
     <script>
         const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 12);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
+        L.control.scale({ imperial: false }).addTo(map);
 
         // Mappe di base libere e leggibili: le strade di Torino si vedono tutte.
+        // In tema scuro vengono invertite via CSS restando nitidissime.
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap contributors | Dati GTT (CC BY 4.0)'
@@ -195,7 +224,25 @@
         let lastData = null;
         let boundsFitted = false;
         let selectedLine = null;
-        let markersByVehicle = {};   // vehicle_id -> marker, per aprire il popup dalla lista
+        let markersByVehicle = {};
+
+        /* ---------- Tema chiaro/scuro (persistito) ---------- */
+        const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+        const MOON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+        function applyTheme(dark) {
+            document.body.classList.toggle('dark', dark);
+            document.getElementById('theme-btn').innerHTML = dark ? SUN : MOON;
+        }
+        function toggleTheme() {
+            const dark = !document.body.classList.contains('dark');
+            applyTheme(dark);
+            localStorage.setItem('gtt-theme', dark ? 'dark' : 'light');
+        }
+        (function initTheme() {
+            const saved = localStorage.getItem('gtt-theme');
+            applyTheme(saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches);
+        })();
 
         function switchTab(tabId, btn) {
             document.querySelectorAll('.feed-section').forEach(el => el.classList.remove('active'));
@@ -211,17 +258,42 @@
                 .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
-        function routeClass(routeId) {
+        /* ---------- Classificazione: SOLO dati ufficiali GTT (route_type GTFS).
+           0 tram, 1 metro, 3 bus, 7 funicolare. Il fallback e' un elenco esatto,
+           non un prefisso: la linea 6 e' un BUS, la 13 non esiste piu'. ---------- */
+        function typeOf(routeId) {
             const r = String(routeId || '');
-            if (/^m/i.test(r)) return 'metro';
-            if (/^(3|4|6|7|8|9|10|13|15|16|18|star)/i.test(r)) return 'tram';
-            return 'bus';
+            const types = (lastData && lastData.route_types) || {};
+            if (r in types) return types[r];
+            if (/^m/i.test(r)) return 1;
+            if (['3', '4', '7', '8', '9', '10', '15', '16', '18'].includes(r) || /^star/i.test(r)) return 0;
+            return 3;
+        }
+
+        const TYPE_LABEL = { 1: 'Metropolitana', 0: 'Tram', 7: 'Funicolare', 3: 'Bus' };
+        const TYPE_FALLBACK_COLOR = { 1: '#e30613', 0: '#c07d1a', 7: '#704f19', 3: '#2264d1' };
+
+        function colorOf(routeId) {
+            const r = String(routeId || '');
+            const colors = (lastData && lastData.route_colors) || {};
+            if (colors[r]) return colors[r];
+            return TYPE_FALLBACK_COLOR[typeOf(r)] || '#6b7487';
+        }
+
+        function textColorOf(routeId) {
+            const r = String(routeId || '');
+            const tc = (lastData && lastData.route_text_colors) || {};
+            if (tc[r]) return tc[r];
+            // Luminanza del colore: testo scuro su linee chiare, bianco altrimenti.
+            const hex = colorOf(r).replace('#', '');
+            const lum = (0.299 * parseInt(hex.slice(0, 2), 16) + 0.587 * parseInt(hex.slice(2, 4), 16) + 0.114 * parseInt(hex.slice(4, 6), 16)) / 255;
+            return lum > 0.62 ? '#16181d' : '#ffffff';
         }
 
         function lineBadge(routeId) {
             const r = String(routeId || '');
-            const cls = (!r || r === 'N/A') ? 'other' : routeClass(r);
-            return '<span class="line-badge ' + cls + '">' + esc(r || '?') + '</span>';
+            if (!r || r === 'N/A') return '<span class="line-badge" style="background:#6b7487;color:#fff;">?</span>';
+            return '<span class="line-badge" style="background:' + colorOf(r) + ';color:' + textColorOf(r) + ';">' + esc(r) + '</span>';
         }
 
         function selectLine(routeId) {
@@ -231,7 +303,7 @@
             if (lastData) updateUI(lastData);
         }
 
-        // Selettore linee raggruppato per tipo: metro, tram e bus tutti a vista.
+        // Selettore linee raggruppato per tipo UFFICIALE: metro, tram, funicolare, bus.
         function renderLinesPanel() {
             if (!lastData) return;
             const counts = {};
@@ -241,8 +313,11 @@
             });
             const total = (lastData.vehicles || []).length;
 
-            const groups = { metro: [], tram: [], bus: [], other: [] };
-            Object.keys(counts).forEach(k => groups[routeClass(k)].push(k));
+            const groups = {};
+            Object.keys(counts).forEach(k => {
+                const t = typeOf(k);
+                (groups[t] = groups[t] || []).push(k);
+            });
             const numeric = (a, b) => {
                 const na = parseFloat(a), nb = parseFloat(b);
                 if (isNaN(na) && isNaN(nb)) return a.localeCompare(b);
@@ -250,17 +325,18 @@
                 if (isNaN(nb)) return -1;
                 return na - nb;
             };
-            for (const g of Object.values(groups)) g.sort(numeric);
+            Object.values(groups).forEach(g => g.sort(numeric));
 
-            const chip = (k) => `<span class="chip t${routeClass(k)} ${selectedLine === k ? 'selected' : ''}" title="Linea ${esc(k)} · ${counts[k]} mezzi" onclick="selectLine('${esc(k)}')"><span class="tdot"></span>${esc(k)}</span>`;
+            const chip = (k) => `<span class="chip ${selectedLine === k ? 'selected' : ''}" title="Linea ${esc(k)} · ${counts[k]} mezzi" onclick="selectLine('${esc(k)}')"><span class="tdot" style="background:${colorOf(k)};"></span>${esc(k)}</span>`;
 
             let html = `<div class="chip-row" style="margin-top:0;">
                 <span class="chip all-chip ${selectedLine === null ? 'selected' : ''}" onclick="selectLine(null)">Tutte le linee · ${total} mezzi</span></div>`;
-            if (groups.metro.length) html += `<div class="group-label">Metropolitana</div><div class="chip-row">${groups.metro.map(chip).join('')}</div>`;
-            if (groups.tram.length) html += `<div class="group-label">Tram</div><div class="chip-row">${groups.tram.map(chip).join('')}</div>`;
-            if (groups.bus.length) html += `<div class="group-label">Bus</div><div class="chip-row">${groups.bus.map(chip).join('')}</div>`;
-            if (groups.other.length) html += `<div class="chip-row">${groups.other.map(chip).join('')}</div>`;
-
+            const order = [1, 0, 7, 3];
+            for (const t of order) {
+                if (groups[t] && groups[t].length) {
+                    html += `<div class="group-label">${TYPE_LABEL[t] || 'Altri'}</div><div class="chip-row">${groups[t].map(chip).join('')}</div>`;
+                }
+            }
             document.getElementById('lines-panel').innerHTML = html;
         }
 
@@ -330,6 +406,10 @@
             return dirs[Math.round(Number(bearing) / 45) % 8];
         }
 
+        function fmtVehicleType(routeId) {
+            return TYPE_LABEL[typeOf(routeId)] || 'Mezzo';
+        }
+
         function categoryBadge(al) {
             switch (al.category) {
                 case 'deviazione': return '<span class="badge detour">Deviazione</span>';
@@ -347,16 +427,16 @@
             const lineAlerts = alerts.filter(al => (al.affected_routes || []).includes(v.route_id));
             const devOnLine = lineAlerts.filter(al => al.category === 'deviazione').length;
             let html = '<div style="min-width:230px;">';
-            html += '<div class="popup-route">' + lineBadge(v.route_id) + ' Mezzo ' + esc(v.vehicle_id) + '</div>';
-            if (routesCatalog[v.route_id]) html += '<div class="popup-row">' + esc(routesCatalog[v.route_id]) + '</div>';
+            html += '<div class="popup-route">' + lineBadge(v.route_id) + ' ' + esc(fmtVehicleType(v.route_id)) + ' ' + esc(v.vehicle_id) + '</div>';
+            if (routesCatalog[v.route_id]) html += '<div class="popup-row" style="font-weight:600;">' + esc(routesCatalog[v.route_id]) + '</div>';
             html += '<div class="popup-big-delay" style="color:' + delayColor(delay) + ';">' + fmtDelay(delay) + '</div>';
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + ' · direzione ' + fmtDirection(v.bearing) + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
-            html += '<div class="popup-row" style="color:#8a93a6;">GPS aggiornato alle ' + gpsTime + '</div>';
+            html += '<div class="popup-row" style="color:var(--text3);">GPS aggiornato alle ' + gpsTime + '</div>';
             if (lineAlerts.length) {
                 html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
                 lineAlerts.slice(0, 2).forEach(al => { html += '<div class="popup-row" style="font-weight:600;">' + esc(al.header) + '</div>'; });
-                if (lineAlerts.length > 2) html += '<div class="popup-row" style="color:#8a93a6;">…e altre ' + (lineAlerts.length - 2) + '</div>';
+                if (lineAlerts.length > 2) html += '<div class="popup-row" style="color:var(--text3);">…e altre ' + (lineAlerts.length - 2) + '</div>';
             }
             html += '</div>';
             return html;
@@ -385,7 +465,10 @@
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT');
             document.getElementById('live-dot').className = 'live-dot on';
 
-            document.getElementById('ws-status').innerHTML = '<span class="live-dot on"></span> ' +
+            const degraded = meta.positions_degraded;
+            document.getElementById('ws-status').innerHTML = degraded
+                ? '<span class="live-dot" style="background:#d97706;"></span> Feed posizioni GTT in manutenzione: mostra solo i mezzi realmente trasmessi (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse attive.'
+                : '<span class="live-dot on"></span> ' +
                 (live ? 'LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
                  'Streaming attivo (modalità smart-fallback GTT)');
 
@@ -440,13 +523,13 @@
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
                 if (isDetour) {
                     line += `<strong>DEVIATIONE — Linea ${esc(routes || 'rete')}</strong>
-                             <span style="display:block;color:#6d28d9;font-weight:700;margin-top:2px;">Percorso modificato: itinerario alternativo. ${esc(effectTxt)}</span>`;
+                             <span style="display:block;color:#7c3aed;font-weight:700;margin-top:2px;">Percorso modificato: itinerario alternativo. ${esc(effectTxt)}</span>`;
                 } else {
                     line += `<strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>
                              <span style="display:block;margin-top:2px;">${esc(al.header)}</span>`;
                 }
                 if (al.description && !isDetour) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
-                line += `<span style="display:block;margin-top:4px;color:#8a93a6;">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span>`;
+                line += `<span style="display:block;margin-top:4px;color:var(--text3);">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span>`;
                 line += '</div>';
                 return line;
             }).join('') :
@@ -487,17 +570,16 @@
             for (const key of routeKeys) {
                 const group = byRoute[key];
                 const longName = routesCatalog[key];
-                html += `<div class="line-group-title">Linea ${esc(key)} · ${group.length} mezzi${longName ? `<span class="route-name">— ${esc(longName)}</span>` : ''}</div>`;
+                html += `<div class="line-group-title">${lineBadge(key)} <span>${esc(fmtVehicleType(key))} · ${group.length} mezzi</span>${longName ? `<span class="route-name">— ${esc(longName)}</span>` : ''}</div>`;
                 for (const v of group) {
                     if (shown >= 300) break;
                     shown++;
                     const delay = delaysByTrip[v.trip_id];
                     html += `<div class="card ${delayClass(delay)}" onclick="focusVehicle('${esc(v.vehicle_id)}')">
-                        ${lineBadge(key)}
-                        <div style="flex:1;">
+                        <div style="flex:1;display:flex;align-items:center;gap:6px;">
                             <strong>Mezzo ${esc(v.vehicle_id)}</strong>
-                            <span>${fmtSpeed(v.speed)} · ${fmtDelay(delay)}</span>
                         </div>
+                        <span style="white-space:nowrap;">${fmtSpeed(v.speed)} · ${fmtDelay(delay)}</span>
                     </div>`;
                 }
             }

@@ -57,6 +57,9 @@ async def fetch_all_gtt_data() -> dict:
         "trip_updates": [],
         "alerts": [],
         "routes_catalog": {},
+        "route_types": {},        # nome linea -> tipo GTFS (0 tram, 1 metro, 3 bus, 7 funicolare)
+        "route_colors": {},       # nome linea -> colore ufficiale GTT
+        "route_text_colors": {},  # nome linea -> colore testo ufficiale
     }
     print("🚦 [SYNC] ===== Avvio sincronizzazione totale rete GTT Torino =====")
 
@@ -103,6 +106,14 @@ async def fetch_all_gtt_data() -> dict:
 
     vehicles, rt_alerts, trip_updates = await asyncio.gather(_vehicles(), _alerts(), _trips())
 
+    # Diagnostica onesta: se GTT pubblica pochissime posizioni ma centinaia di
+    # corse nei trip updates, il feed posizioni di GTT e' degradato LORO.
+    trip_vehicle_count = len({tu.get("vehicle_id") for tu in trip_updates if tu.get("vehicle_id")})
+    positions_degraded = len(vehicles) < 10 and trip_vehicle_count > 50
+    if positions_degraded:
+        print(f"⚠️ [SYNC] Feed posizioni GTT degradato: GTT pubblica solo {len(vehicles)} mezzi "
+              f"mentre {trip_vehicle_count} corse sono attive. Mostro solo i dati reali disponibili.")
+
     # Il feed trip_update di GTT non contiene mai route_id: risolviamo la linea
     # incrociando vehicle_id (e trip_id) con il feed posizioni veicoli.
     vehicle_trip_routes = {v["trip_id"]: v["route_id"] for v in vehicles if v.get("trip_id") and v.get("route_id")}
@@ -144,6 +155,12 @@ async def fetch_all_gtt_data() -> dict:
 
     result["alerts"] = alerts
 
+    # Tipi e colori UFFICIALI delle linee (dal GTFS-Static): la UI non deve
+    # indovinare quale linea sia tram o bus, usa il dato reale.
+    result["route_types"] = gtfs_manager.get_route_types()
+    result["route_colors"] = gtfs_manager.get_route_colors()
+    result["route_text_colors"] = gtfs_manager.get_route_text_colors()
+
     # FASE 5: Metadati e aggiornamento snapshot globale.
     vehicles_source = getattr(vehicles_scraper, "last_fetch_source", "unknown")
     alerts_source = getattr(gtfs_rt, "last_alerts_source", "unknown")
@@ -158,6 +175,8 @@ async def fetch_all_gtt_data() -> dict:
         "alerts_count": len(result["alerts"]),
         "trip_updates_count": len(result["trip_updates"]),
         "routes_count": len(result["routes_catalog"]),
+        "positions_degraded": positions_degraded,
+        "trip_vehicles": trip_vehicle_count,
     }
 
     try:

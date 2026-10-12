@@ -12,6 +12,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 import time
 import zipfile
 
@@ -108,7 +109,10 @@ class GtfsStaticManager:
 
     def __init__(self):
         self._routes_cache: dict = {}
-        self._route_id_map: dict = {}  # route_id GTFS (es. "2U") -> route_short_name (es. "2")
+        self._route_id_map: dict = {}   # route_id GTFS (es. "2U") -> route_short_name (es. "2")
+        self._route_types: dict = {}    # short_name -> route_type GTFS (0 tram, 1 metro, 3 bus, 7 funicolare)
+        self._route_colors: dict = {}  # short_name -> "#RRGGBB" (colori ufficiali GTT)
+        self._route_text_colors: dict = {}  # short_name -> "#RRGGBB"
         self._cache_loaded_at: float = 0.0
         self._cache_source: str = "fallback"
         self._lock = asyncio.Lock()
@@ -150,6 +154,33 @@ class GtfsStaticManager:
             return self._route_id_map[rid]
         return rid
 
+    def get_route_types(self) -> dict:
+        """Tipo di mezzo per linea dai dati UFFICIALI GTT (route_type GTFS).
+
+        0 = tram, 1 = metro, 3 = bus, 7 = funicolare. Fallback locale
+        se il catalogo non e' stato ancora scaricato: la linea 6 e' un BUS
+        (dato reale GTT), i tram di Torino sono 3, 4, 7, 8, 9, 10, 15, 16, 18.
+        """
+        if self._is_cache_fresh() and self._route_types:
+            return dict(self._route_types)
+        fallback = dict.fromkeys(FALLBACK_ROUTES, 3)
+        for tram in ["3", "4", "7", "8", "9", "10", "15", "16", "18"]:
+            fallback[tram] = 0
+        fallback["M1"] = 1
+        return fallback
+
+    def get_route_colors(self) -> dict:
+        """Colori ufficiali delle linee GTT (route_color del GTFS-Static)."""
+        if self._is_cache_fresh() and self._route_colors:
+            return dict(self._route_colors)
+        return {}
+
+    def get_route_text_colors(self) -> dict:
+        """Colori del testo ufficiali per badge linea (route_text_color GTFS)."""
+        if self._is_cache_fresh() and self._route_text_colors:
+            return dict(self._route_text_colors)
+        return {}
+
     # ------------------------------------------------------------------
     # Percorso asincrono: scarica il GTFS-Static ufficiale con cache TTL.
     # ------------------------------------------------------------------
@@ -170,6 +201,9 @@ class GtfsStaticManager:
             if routes:
                 self._routes_cache = routes["short_names"]
                 self._route_id_map = routes["route_id_map"]
+                self._route_types = routes.get("route_types", {})
+                self._route_colors = routes.get("route_colors", {})
+                self._route_text_colors = routes.get("route_text_colors", {})
                 self._cache_loaded_at = time.time()
                 self._cache_source = "gtfs-static-ufficiale"
                 print(f"✅ [CATALOGO] GTFS-Static ufficiale scaricato: {len(self._routes_cache)} linee reali della rete GTT catalogate.")
@@ -196,6 +230,9 @@ class GtfsStaticManager:
 
                 short_names = {}
                 route_id_map = {}
+                route_types = {}
+                route_colors = {}
+                route_text_colors = {}
                 for row in csv.DictReader(content.splitlines()):
                     route_id = (row.get("route_id") or "").strip()
                     short = (row.get("route_short_name") or route_id or "").strip()
@@ -204,8 +241,24 @@ class GtfsStaticManager:
                         short_names[short] = route_long
                     if route_id and short:
                         route_id_map[route_id] = short
+                    try:
+                        route_types[short] = int((row.get("route_type") or "3").strip() or 3)
+                    except ValueError:
+                        route_types[short] = 3
+                    color = (row.get("route_color") or "").strip()
+                    if color and re.match(r"^[0-9A-Fa-f]{6}$", color):
+                        route_colors[short] = f"#{color.upper()}"
+                    text_color = (row.get("route_text_color") or "").strip()
+                    if text_color and re.match(r"^[0-9A-Fa-f]{6}$", text_color):
+                        route_text_colors[short] = f"#{text_color.upper()}"
                 if short_names:
-                    return {"short_names": short_names, "route_id_map": route_id_map}
+                    return {
+                        "short_names": short_names,
+                        "route_id_map": route_id_map,
+                        "route_types": route_types,
+                        "route_colors": route_colors,
+                        "route_text_colors": route_text_colors,
+                    }
             except Exception as exc:
                 print(f"⚠️ [CATALOGO] Download fallito da {url}: {exc}")
                 continue
