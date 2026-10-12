@@ -125,19 +125,35 @@ async def fetch_all_gtt_data() -> dict:
         if resolved:
             tu["route_id"] = resolved
 
-    # RITARDO PEFETTO: join lato server, PRIMA per vehicle_id (identita' stabile
-    # del mezzo anche quando cambia corsa), poi per trip_id, infine 0 (in orario).
-    # I due feed sono scaricati a millisecondi di distanza: il join per trip_id
-    # da' falsi 'n/d' o ritardi di corsa precedente; per vehicle_id e' esatto.
-    delay_by_vehicle = {tu.get("vehicle_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("vehicle_id") and tu.get("delay_seconds") is not None}
+    # RITARDO PERFETTO: un mezzo in cambio corsa puo' avere PIU' trip updates
+    # contemporanee (vecchia + nuova corsa, 21 mezzi su ~450 in questo momento).
+    # Si sceglie: 1) l'entita' la cui corsa coincide con quella ATTUALE del mezzo
+    # (dal feed posizioni), 2) altrimenti la piu' recente per timestamp.
+    # Mai il ritardo di una corsa terminata.
+    from collections import defaultdict
+
+    updates_by_vehicle = defaultdict(list)
+    for tu in trip_updates:
+        if tu.get("vehicle_id"):
+            updates_by_vehicle[tu["vehicle_id"]].append(tu)
     delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
+
     for v in vehicles:
-        delay = None
-        if v.get("vehicle_id"):
-            delay = delay_by_vehicle.get(v["vehicle_id"])
-        if delay is None and v.get("trip_id"):
-            delay = delay_by_trip.get(v["trip_id"])
-        v["delay_seconds"] = delay if delay is not None else 0
+        candidates = updates_by_vehicle.get(v.get("vehicle_id")) or []
+        chosen = None
+        for tu in candidates:
+            if tu.get("trip_id") == v.get("trip_id"):
+                chosen = tu
+                break
+        if chosen is None and candidates:
+            chosen = max(candidates, key=lambda t: t.get("timestamp") or 0)
+        if chosen is not None:
+            v["delay_seconds"] = chosen["delay_seconds"]
+        elif v.get("trip_id") in delay_by_trip:
+            v["delay_seconds"] = delay_by_trip[v["trip_id"]]
+        else:
+            # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
+            v["delay_seconds"] = 0
 
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates
