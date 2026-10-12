@@ -7,4 +7,4 @@ httpx>=0.27.0
 supabase>=2.0.0
 psycopg[binary]>=3.1.0
 tenacity==9.0.0
-pybreaker==1.2.0
+pybreaker==1.4.1
