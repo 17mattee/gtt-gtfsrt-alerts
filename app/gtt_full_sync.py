@@ -82,13 +82,9 @@ async def fetch_all_gtt_data() -> dict:
         try:
             return await fetch_gtt_vehicle_positions()
         except Exception as exc:
-            logger.warning("Errore recupero veicoli (%s): flotta fallback.", exc)
-            print(f"🚌 [SYNC] FASE 2 ERRORE ({exc}): uso flotta di emergenza.")
-            return [{
-                "vehicle_id": "GTT-TRN-EMERGENCY", "trip_id": "trip_emergency",
-                "route_id": "M1", "latitude": 45.0703, "longitude": 7.6869,
-                "bearing": 0.0, "speed": 8.0, "timestamp": int(time.time()),
-            }]
+            logger.warning("Errore recupero veicoli (%s): mostro solo i dati pubblicati da GTT.", exc)
+            print(f"🚌 [SYNC] FASE 2 ERRORE ({exc}): nessun mezzo pubblicato (politica dati reali).")
+            return []
 
     async def _alerts():
         try:

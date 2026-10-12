@@ -491,11 +491,14 @@
             document.getElementById('live-dot').className = 'live-dot on';
 
             const degraded = meta.positions_degraded;
-            document.getElementById('ws-status').innerHTML = degraded
+            const unavailable = meta.vehicles_source === 'unavailable';
+            document.getElementById('ws-status').innerHTML = unavailable
+                ? '<span class="live-dot" style="background:#dc2626;"></span> Feed posizioni GTT non raggiungibile in questo momento: appena GTT riprende a trasmettere la mappa si repopola da sola.'
+                : degraded
                 ? '<span class="live-dot" style="background:#d97706;"></span> Feed posizioni GTT in manutenzione: mostra solo i mezzi realmente trasmessi (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse attive.'
                 : '<span class="live-dot on"></span> ' +
                 (live ? 'LIVE dai feed ufficiali GTT — ' + vehicles.length + ' mezzi reali' :
-                 'Streaming attivo (modalità smart-fallback GTT)');
+                 'Streaming attivo');
 
             // --- Mappa: TUTTI i mezzi sempre visibili; la linea selezionata e'
             //     a dimensione piena con freccia di direzione, le altre attenuate. ---
@@ -609,7 +612,7 @@
                 }
             }
             document.getElementById('vehicles-list').innerHTML = html ||
-                '<div class="card"><strong>Nessun veicolo trovato</strong><span>Nessun mezzo corrisponde alla selezione: prova "Tutte le linee" o cambia filtro.</span></div>';
+                '<div class="card"><strong>Nessun veicolo pubblicato da GTT in questo momento</strong><span>La Control Room mostra solo dati reali: appena GTT trasmette, i mezzi appaiono da soli.</span></div>';
         }
 
         function renderDelaysList(tripUpdates) {

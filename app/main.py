@@ -167,10 +167,10 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             cycle += 1
 
-            # Cold start: se il refresher non ha ancora riempito lo snapshot,
-            # si attende il primo sync reale per il primo messaggio.
+            # Cold start: solo al PRIMO messaggio si attende un sync reale;
+            # se GTT pubblica zero mezzi, si mostra zero (dato reale).
             payload = get_network_snapshot()
-            if not payload.get("vehicles"):
+            if cycle == 1 and not payload.get("vehicles"):
                 try:
                     payload = await fetch_all_gtt_data()
                 except Exception as exc:

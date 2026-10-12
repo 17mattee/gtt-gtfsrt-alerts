@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ## Regole fondamentali
 
 1. **Mai bloccare l'event loop.** Tutto l'I/O esterno nei percorsi async deve usare chiamate `httpx` asincrone o `asyncio.to_thread`. La funzione sincrona `get_gtfs_routes()` non deve mai toccare la rete.
-2. **Mai restituire vuoto.** `fetch_all_gtt_data()` e `fetch_gtt_vehicle_positions()` non devono mai lanciare eccezioni né restituire strutture vuote — la mappa non deve mai restare bianca.
+2. **Mai eccezioni, mai dati finti.** `fetch_all_gtt_data()` e `fetch_gtt_vehicle_positions()` non devono mai lanciare eccezioni; un risultato vuoto è legittimo quando GTT non pubblica nulla. I veicoli simulati sono vietati — la UI mostra la verità con un banner esplicito.
 3. **Ogni nuova dipendenza esterna richiede un timeout.** Nessuna chiamata verso l'esterno senza timeout esplicito e un try/except che degrada in modo controllato.
 4. **Escapare tutto.** La dashboard renderizza dati provenienti da feed esterni: usa sempre l'helper `esc()` prima di inserire qualsiasi stringa in `innerHTML`.
 5. **Tieni i fallback aggiornati con la realtà.** La lista linee di fallback locale deve contenere solo linee GTT reali.

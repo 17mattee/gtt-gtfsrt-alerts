@@ -17,7 +17,8 @@
 - **Ritardi reali** — Trip Updates ufficiali GTFS-RT, ritardo per corsa in minuti, incrociato con il feed veicoli per mostrare sempre il numero di linea.
 - **Deviazioni e avvisi, super chiari** — ogni avviso ufficiale GTT viene classificato (deviazione, interruzione, fermata spostata, ritardo, informazione), tradotto in italiano comprensibile, e le linee coinvolte vengono estratte automaticamente anche quando GTT le indica solo nel testo dell'avviso.
 - **Catalogo di 215 linee** — il catalogo completo ufficiale delle linee, scaricato dinamicamente dal feed GTFS-Static di GTT e rinnovato ogni ora.
-- **Resilienza a prova di bomba** — cascata a tre livelli su ogni fonte dati (feed ufficiale → endpoint alternativi → scraper portale → fallback locale). Se GTT cambia sito, la mappa continua a funzionare.
+- **Resilienza a prova di bomba** — cascata multi-endpoint su ogni fonte dati con circuit breaker e cache. Se GTT cambia sito, il servizio continua a funzionare.
+- **Solo dati veri** — la Control Room mostra esattamente ciò che GTT pubblica. Se il feed veicoli di GTT si blocca (guasto loro), la barra di stato lo dichiara e la mappa si repopola da sola quando riprendono — mai mezzi simulati.
 - **Control Room** — dashboard Leaflet in dark mode con marker colorati (verde in orario / arancio 2-5 min / rosso oltre 5 min), tab live per flotta, ritardi e avvisi, WebSocket con riconnessione automatica.
 
 ## Architettura
@@ -148,7 +149,7 @@ locust -f scripts/locustfile.py          # load testing
 
 | Guasto | Comportamento |
 |---|---|
-| Feed veicoli ufficiale giù | Endpoint di fallback, poi flotta simulata intelligente su linee reali di Torino — la mappa non è mai vuota |
+| Feed veicoli ufficiale giù | Endpoint di fallback, poi stato vuoto onesto con banner esplicito — nessun mezzo simulato (solo dati reali) |
 | Feed avvisi giù | Scraper HTML del portale (retry + circuit breaker), poi avviso informativo di default |
 | GTFS-Static giù | 2 mirror + catalogo in cache + fallback locale di 71 linee; i percorsi sincroni non toccano mai la rete |
 | GTT cambia formato dei route-id | Gli ID passano invariati; le etichette si degradano in modo controllato |

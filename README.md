@@ -17,7 +17,8 @@
 - **Real delays** — official GTFS-RT Trip Updates, per-trip delay in minutes, joined with the fleet feed to always show the line number.
 - **Detours & service alerts, crystal clear** — every official GTT alert is classified (detour, disruption, stop moved, delay, info), translated to plain Italian, and affected lines are extracted automatically even when GTT only mentions them in the alert text.
 - **215-line catalog** — the complete official route catalog, downloaded dynamically from GTT's GTFS-Static feed and refreshed hourly.
-- **Bullet-proof resilience** — three-level cascade on every data source (official feed → fallback endpoints → portal scraper → local fallback). If GTT changes its website, the map keeps working.
+- **Bullet-proof resilience** — multi-endpoint cascade on every data source with circuit breaker and caches. If GTT changes its website, the service keeps working.
+- **Real data only** — the Control Room shows exactly what GTT publishes. If GTT's vehicle feed goes quiet (their-side outage), the status bar says so and the map repopulates automatically when they resume — no simulated vehicles, ever.
 - **Control Room UI** — dark-mode Leaflet dashboard with color-coded markers (green on time / orange 2–5 min late / red >5 min), live tabs for fleet, delays and alerts, auto-reconnect WebSocket.
 
 ## Architecture
@@ -148,7 +149,7 @@ locust -f scripts/locustfile.py          # load testing
 
 | Failure | Behaviour |
 |---|---|
-| Official vehicle feed down | Fallback endpoints, then a smart simulated fleet on real Turin lines — the map is never empty |
+| Official vehicle feed down | Fallback endpoints, then an honest empty state with a clear banner — no simulated vehicles (real data only) |
 | Alerts feed down | Portal HTML scraper (retry + circuit breaker), then default informational alert |
 | GTFS-Static down | 2 mirrors + cached catalog + local 71-line fallback; sync paths never touch the network |
 | GTT changes route-id format | Raw IDs pass through unchanged; labels degrade gracefully |

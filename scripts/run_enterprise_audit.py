@@ -45,10 +45,11 @@ async def run_comprehensive_audit():
     print("\n[3/6] Test telemetria in tempo reale dei mezzi di Torino...")
     try:
         vehicles = await fetch_gtt_vehicle_positions()
-        print(f"  ✅ Mezzi tracciati dal sistema: {len(vehicles)}")
+        print(f"  ✅ Mezzi pubblicati da GTT in questo istante: {len(vehicles)} (solo dati reali)")
         assert isinstance(vehicles, list)
-        assert len(vehicles) > 0
-        sample = vehicles[0]
+        if len(vehicles) == 0:
+            print("  ℹ️ GTT non pubblica posizioni ora: nessun mezzo simulato.")
+        sample = vehicles[0] if vehicles else {"vehicle_id": "n/d", "route_id": "n/d", "latitude": 0, "longitude": 0}
         print(f"     Esempio mezzo -> ID: {sample.get('vehicle_id')} | Linea: {sample.get('route_id')} | Pos: ({sample.get('latitude')}, {sample.get('longitude')})")
     except Exception as e:
         err_msg = f"Fallimento test Vehicle Scraper: {e}"

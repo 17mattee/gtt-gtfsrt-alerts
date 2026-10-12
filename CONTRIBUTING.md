@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ## Ground rules
 
 1. **Never block the event loop.** All external I/O inside async paths must use `httpx` async calls or `asyncio.to_thread`. The sync `get_gtfs_routes()` must never touch the network.
-2. **Never return empty.** `fetch_all_gtt_data()` and `fetch_gtt_vehicle_positions()` must never raise and never return empty structures — the map must never be blank.
+2. **Never raise, never fake.** `fetch_all_gtt_data()` and `fetch_gtt_vehicle_positions()` must never raise; an empty result is legitimate when GTT publishes nothing. Simulated vehicles are forbidden — the UI shows the truth with a clear banner.
 3. **Every new external dependency needs a timeout.** No call to the outside world without an explicit timeout and a try/except that degrades gracefully.
 4. **Escape everything.** The dashboard renders data coming from external feeds: always use the `esc()` helper before putting any string into `innerHTML`.
 5. **Keep fallbacks in sync with reality.** The local fallback route list must only contain real GTT lines.
