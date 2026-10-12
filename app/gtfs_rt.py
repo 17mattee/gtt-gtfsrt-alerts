@@ -192,19 +192,31 @@ async def fetch_gtt_trip_updates() -> list:
             break
 
     if feed is not None:
+        now = time.time()
         for entity in feed.entity:
             if not entity.HasField("trip_update"):
                 continue
             tu = entity.trip_update
-            # Il ritardo varia fermata per fermata: si prende l'ULTIMO
-            # StopTimeUpdate con delay = previsione piu' recente e rilevante
-            # (la prossima fermata), MAI la prima fermata gia' passata.
+            # RITARDO: si prende l'ultimo StopTimeUpdate con delay = previsione
+            # attuale della corsa (verificato sui dati GTT: coincide col ritardo
+            # della prossima fermata; le fermate passate portano ritardi vecchi).
             delay = None
+            # PROSSIMA FERMATA: primo StopTimeUpdate con orario d'arrivo nel futuro,
+            # con stop_id e orario previsto (per la precisione sull'arrivo reale).
+            next_stop = None
             for stu in tu.stop_time_update:
                 if stu.HasField("arrival") and stu.arrival.HasField("delay"):
                     delay = stu.arrival.delay
                 elif stu.HasField("departure") and stu.departure.HasField("delay"):
                     delay = stu.departure.delay
+                if next_stop is None:
+                    arr_ts = None
+                    if stu.HasField("arrival") and stu.arrival.time:
+                        arr_ts = stu.arrival.time
+                    elif stu.HasField("departure") and stu.departure.time:
+                        arr_ts = stu.departure.time
+                    if arr_ts and arr_ts >= now - 30:  # tolleranza 30s per dati al limite
+                        next_stop = {"stop_id": stu.stop_id, "arrival_ts": arr_ts}
             # Standard GTFS-RT: trip tracciato senza campo delay = corsa che
             # sta rispettando l'orario programmato. Il ritardo e' quindi SEMPRE
             # disponibile per ogni corsa attiva (mai 'n/d').
@@ -216,6 +228,7 @@ async def fetch_gtt_trip_updates() -> list:
                 "route_id": route_id or "N/A",
                 "vehicle_id": tu.vehicle.id if tu.HasField("vehicle") else None,
                 "delay_seconds": delay,
+                "next_stop": next_stop,
                 "timestamp": tu.timestamp or int(time.time()),
             })
         last_trip_updates_source = "live"

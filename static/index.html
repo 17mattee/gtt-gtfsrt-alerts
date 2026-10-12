@@ -72,8 +72,14 @@
 
         .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 6px; font-size: 0.83rem; display: flex; align-items: center; gap: 10px; cursor: pointer; }
         .card:hover { background: var(--soft); }
-        .card.alert { border-left: 3px solid var(--warn); cursor: default; display: block; }
-        .card.detour { border-left: 3px solid #7c3aed; cursor: default; display: block; }
+        .card.alert { border-left: 3px solid var(--warn); cursor: default; display: block; padding: 11px 13px; }
+        .card.detour { border-left: 3px solid #7c3aed; cursor: default; display: block; padding: 11px 13px; background: var(--soft); }
+        .alert-type { display: inline-block; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; margin-bottom: 5px; }
+        .alert-type.detour { background: #7c3aed; color: #fff; }
+        .alert-type.stop { background: #c22a1e; color: #fff; }
+        .alert-type.info { background: #2563eb; color: #fff; }
+        .alert-lines { margin: 4px 0 2px; }
+        .alert-meta { margin-top: 6px; font-size: 0.72rem; color: var(--text-3); }
         .card.d-ok { border-left: 3px solid var(--ok); }
         .card.d-warn { border-left: 3px solid var(--warn); }
         .card.d-late { border-left: 3px solid var(--late); }
@@ -201,6 +207,11 @@
         let boundsFitted = false;
         let selectedLine = null;
         let markersByVehicle = {};
+        // Popup persistente: sopravvive ai refresh (si riapre sullo stesso mezzo
+        // con dati aggiornati) finche' l'utente non lo chiude.
+        let openPopupVehicle = null;
+        let renderingMarkers = false;
+        map.on('popupclose', () => { if (!renderingMarkers) openPopupVehicle = null; });
 
         /* ---------- Tema ---------- */
         const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
@@ -370,6 +381,7 @@
 
         function vehiclePopup(v, routesCatalog, alerts) {
             const delay = v.delay_seconds ?? 0;
+            const gpsAge = v.timestamp ? Math.round(Date.now() / 1000 - Number(v.timestamp)) : null;
             const gpsTime = v.timestamp ? new Date(Number(v.timestamp) * 1000).toLocaleTimeString('it-IT') : 'n/d';
             const lineAlerts = alerts.filter(al => (al.affected_routes || []).includes(v.route_id));
             const devOnLine = lineAlerts.filter(al => al.category === 'deviazione').length;
@@ -378,7 +390,14 @@
             if (routesCatalog[v.route_id]) html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + esc(routesCatalog[v.route_id]) + '</div>';
             html += '<div class="popup-big-delay" style="color:' + delayColor(delay) + ';">' + fmtDelay(delay) + '</div>';
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + ' · direzione ' + fmtDirection(v.bearing) + '</div>';
-            html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + ' · GPS ' + gpsTime + '</div>';
+            html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
+            if (v.next_stop) {
+                html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + ' · tra ' + v.next_stop.minutes + ' min</div>';
+                if (v.next_stop.incoerente) {
+                    html += '<div class="popup-row" style="color:#b96b00;">⚠ Previsione GTT non coerente con la posizione GPS attuale</div>';
+                }
+            }
+            html += '<div class="popup-row" style="color:#8a8a86;">GPS ' + gpsTime + (gpsAge != null ? ' (' + gpsAge + 's fa)' : '') + (gpsAge != null && gpsAge > 120 ? ' · segnale datato' : '') + '</div>';
             if (lineAlerts.length) {
                 html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
                 lineAlerts.slice(0, 2).forEach(al => { html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + esc(al.header) + '</div>'; });
@@ -435,6 +454,7 @@
                 : 'In attesa dei feed GTT…';
 
             /* --- Mappa: con una linea selezionata si vedono SOLO i suoi mezzi --- */
+            renderingMarkers = true;
             markersLayer.clearLayers();
             markersByVehicle = {};
             const bounds = [];
@@ -455,8 +475,15 @@
                 const icon = L.divIcon({ className: 'veh-icon', html: dotHtml, iconSize: [13, 13] });
                 const marker = L.marker([lat, lon], { icon });
                 marker.bindPopup(vehiclePopup(v, routesCatalog, alerts), { maxWidth: 300 });
+                marker.on('click', () => { openPopupVehicle = v.vehicle_id; });
                 markersLayer.addLayer(marker);
                 markersByVehicle[v.vehicle_id] = marker;
+            }
+            // Riapre il popup sullo stesso mezzo dopo il refresh: le informazioni
+            // restano visibili e si aggiornano in tempo reale.
+            renderingMarkers = false;
+            if (openPopupVehicle && markersByVehicle[openPopupVehicle]) {
+                markersByVehicle[openPopupVehicle].openPopup();
             }
             if (bounds.length && !boundsFitted) {
                 map.flyToBounds(bounds, { padding: [50, 50], maxZoom: selectedLine ? 14 : 13, duration: 0.8 });
@@ -470,21 +497,27 @@
             /* --- Avvisi: deviazioni in testa, spiegazione chiara --- */
             const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
             const sorted = alerts.slice().sort((a, b) => (order[a.category] ?? 9) - (order[b.category] ?? 9));
+            const TYPE_BADGE = { deviazione: ['detour', 'Deviazione di percorso'], interruzione: ['stop', 'Servizio sospeso'], fermata_spostata: ['stop', 'Fermata spostata'], servizio_ridotto: ['info', 'Servizio ridotto'], ritardo: ['info', 'Ritardi previsti'] };
             document.getElementById('alerts-list').innerHTML = sorted.length ? sorted.map(al => {
-                const routes = (al.affected_routes || []).join(', ');
                 const isDetour = al.category === 'deviazione';
                 const effectTxt = al.effect_label || '';
                 const causeTxt = al.cause_label || '';
+                const badge = TYPE_BADGE[al.category] || ['info', 'Avviso'];
+                const routesArr = (al.affected_routes || []).slice(0, 8);
+                const lineBadges = routesArr.length
+                    ? '<div class="alert-lines">' + routesArr.map(lineBadge).join(' ') + '</div>'
+                    : '<div class="alert-lines"><span style="color:var(--text-3);font-size:0.75rem;">Tutta la rete</span></div>';
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
+                line += `<span class="alert-type ${badge[0]}">${badge[1]}</span>`;
                 if (isDetour) {
-                    line += `<strong>DEVIATIONE — Linea ${esc(routes || 'rete')}</strong>
-                             <span style="display:block;color:#7c3aed;font-weight:600;margin-top:2px;">Percorso modificato: il mezzo segue un itinerario alternativo. ${esc(effectTxt)}</span>`;
+                    line += `<strong style="color:#1a1a1a;">Il percorso di queste linee è MODIFICATO</strong>
+                             <span style="display:block;color:#7c3aed;font-weight:600;margin-top:2px;">I mezzi seguono un itinerario alternativo: le fermate abituali potrebbero non essere servite.</span>`;
                 } else {
-                    line += `<strong>${categoryBadge(al)}Linea ${esc(routes || 'Generale')}</strong>
-                             <span style="display:block;margin-top:2px;">${esc(al.header)}</span>`;
+                    line += `<strong style="color:#1a1a1a;">${esc(al.header)}</strong>`;
                 }
-                if (al.description && !isDetour) line += `<span style="display:block;margin-top:2px;">${esc(al.description)}</span>`;
-                line += `<span style="display:block;margin-top:4px;color:var(--text-3);">Motivo: ${esc(causeTxt)} · Effetto: ${esc(effectTxt)}</span></div>`;
+                line += lineBadges;
+                if (al.description && !isDetour) line += `<span style="display:block;margin-top:4px;">${esc(al.description)}</span>`;
+                line += `<div class="alert-meta">Motivo: ${esc(causeTxt) || 'non specificato'} · Effetto: ${esc(effectTxt) || 'non specificato'}</div></div>`;
                 return line;
             }).join('') :
                 '<div class="card alert"><strong>Nessuna interruzione critica</strong><span>La rete GTT risulta regolare su tutte le linee urbane e metropolitane.</span></div>';
@@ -522,9 +555,10 @@
                 for (const v of group) {
                     if (shown >= 300) break;
                     shown++;
+                    const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;"><strong>Mezzo ${esc(v.vehicle_id)}</strong></div>
-                        <span style="white-space:nowrap;">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}</span>
+                        <span style="white-space:nowrap;">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${gpsStale ? ' · GPS datato' : ''}</span>
                     </div>`;
                 }
             }

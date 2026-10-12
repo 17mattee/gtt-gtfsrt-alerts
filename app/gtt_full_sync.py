@@ -29,6 +29,54 @@ network_snapshot: dict = {
     "meta": {"last_update": None, "vehicles_source": "unknown", "routes_source": "unknown"},
 }
 
+_last_sequence_refresh = 0.0
+SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
+
+
+def _rome_offset_seconds(epoch: float) -> int:
+    """Fuso orario Europe/Rome (CET +1, DST +2) calcolato senza librerie esterne.
+
+    Le ore GTFS sono locali (Roma), gli epoch del feed GTFS-RT sono UTC:
+    serve l'offset per allinearli (DST: ultima domenica di marzo -> ottobre).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    year = dt.year
+
+    def last_sunday_utc(month: int, hour: int) -> datetime:
+        d = datetime(year, month, 31, hour, tzinfo=timezone.utc)
+        while d.weekday() != 6:  # domenica
+            d -= timedelta(days=1)
+        return d
+
+    dst_start = last_sunday_utc(3, 1)   # 02:00 locale = 01:00 UTC
+    dst_end = last_sunday_utc(10, 1)     # 03:00 locale = 01:00 UTC
+    return 7200 if dst_start <= dt < dst_end else 3600
+
+
+def _match_next_stop(sequence, rt_arrival_ts, delay_seconds, tolerance=300):
+    """Ricostruisce la fermata successiva dal GTFS-Static (il feed RT non ha stop_id).
+
+    L'orario programmato della fermata e' (arrivo_previsto - ritardo): si cerca
+    nella sequenza della corsa la fermata il cui orario programmato locale,
+    spostato nella giornata di servizio, coincide con (arrivo_previsto - ritardo).
+    Ritorna lo stop_id o None se nessun match confidente.
+    """
+    if not sequence:
+        return None
+    # Allineamento: gli orari GTFS sono locali (Roma), l'epoch del feed e' UTC.
+    # La mezzanotte di Roma anticipa quella UTC dell'offset (es. 22:00 UTC del
+    # giorno prima), quindi l'offset va SOMMATO per ottenere i secondi locali.
+    scheduled_local_sec = (rt_arrival_ts - delay_seconds + _rome_offset_seconds(rt_arrival_ts)) % 86400
+    best_stop, best_dist = None, None
+    for sched, stop_id in sequence:
+        d = abs(sched - scheduled_local_sec)
+        d = min(d, 86400 - d)  # distanza circolare (corse oltre la mezzanotte)
+        if best_dist is None or d < best_dist:
+            best_stop, best_dist = stop_id, d
+    return best_stop if best_dist is not None and best_dist <= tolerance else None
+
 DEFAULT_ALERT = {
     "alert_id": "gtt-alert-01",
     "header": "Regolarità sulla rete tranviaria e metropolitana di Torino.",
@@ -137,6 +185,27 @@ async def fetch_all_gtt_data() -> dict:
         if tu.get("vehicle_id"):
             updates_by_vehicle[tu["vehicle_id"]].append(tu)
     delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
+    stops_catalog = gtfs_manager.get_stops()
+    from app.vehicles_scraper import _haversine_meters
+
+    # Fermate programmate per corsa (stop_times GTFS-Static): il feed RT di GTT
+    # non pubblica gli stop_id, servono per risalire al nome della prossima
+    # fermata. Si aggiornano ogni 10 minuti per le corse appena partite.
+    # NB: si includono ANCHE i trip_id dei trip updates (quelli del feed
+    # posizioni possono essere vuoti o sfasati durante il cambio corsa).
+    global _last_sequence_refresh
+    trip_sequences = gtfs_manager.get_trip_sequences()
+    active_trips = {v.get("trip_id") for v in vehicles if v.get("trip_id")}
+    active_trips |= {tu.get("trip_id") for tu in trip_updates if tu.get("trip_id")}
+    missing = [t for t in active_trips if t not in trip_sequences]
+    if missing and (time.time() - _last_sequence_refresh) > SEQUENCE_REFRESH_INTERVAL:
+        _last_sequence_refresh = time.time()
+        try:
+            await asyncio.to_thread(gtfs_manager.refresh_trip_sequences, active_trips)
+            trip_sequences = gtfs_manager.get_trip_sequences()
+            print(f"📍 [SYNC] Fermate programmate caricate dal GTFS-Static per {len(missing)} nuove corse.")
+        except Exception as exc:
+            logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
 
     for v in vehicles:
         candidates = updates_by_vehicle.get(v.get("vehicle_id")) or []
@@ -154,6 +223,44 @@ async def fetch_all_gtt_data() -> dict:
         else:
             # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
             v["delay_seconds"] = 0
+
+        # PRECISIONE D'ARRIVO: prossima fermata con nome reale (GTFS-Static) e
+        # minuti all'arrivo previsti da GTT. Con verifica di coerenza: se il GPS
+        # del mezzo e' troppo lontano dalla fermata per arrivarci in tempo, la
+        # previsione viene marcata come incoerente (dato reale, mai modificato).
+        next_stop = (chosen or {}).get("next_stop") if chosen is not None else None
+        if next_stop:
+            stop = stops_catalog.get(next_stop.get("stop_id")) or {}
+            remaining = next_stop.get("arrival_ts", 0) - time.time()
+            entry = {
+                "name": stop.get("name") or next_stop.get("stop_id") or "fermata",
+                "arrival_ts": next_stop.get("arrival_ts"),
+                "minutes": max(0, round(remaining / 60)),
+                "incoerente": False,
+            }
+            # Il feed RT non pubblica gli stop_id: si risale alla fermata vera
+            # incrociando l'orario programmato del GTFS-Static (arrivo_previsto
+            # - ritardo = orario programmato della fermata). Match confidenziale.
+            # NB: si usa il trip_id del TRIP UPDATE scelto (quello del veicolo
+            # nel feed posizioni puo' essere vuoto o sfasato durante il cambio corsa).
+            chosen_trip = (chosen or {}).get("trip_id")
+            if not stop and chosen_trip and chosen_trip in trip_sequences:
+                matched = _match_next_stop(
+                    trip_sequences[chosen_trip],
+                    next_stop.get("arrival_ts", 0),
+                    chosen.get("delay_seconds", 0) if chosen else 0,
+                )
+                if matched:
+                    stop = stops_catalog.get(matched) or {}
+                    if stop.get("name"):
+                        entry["name"] = stop["name"]
+            if stop.get("lat") and stop.get("lon") and remaining > 0:
+                dist = _haversine_meters(v.get("latitude", 0), v.get("longitude", 0), stop["lat"], stop["lon"])
+                # Velocita' richiesta oltre ~108 km/h con distanza significativa
+                # = previsione non plausibile rispetto alla posizione GPS reale.
+                if dist > 500 and (dist / remaining) > 30.0:
+                    entry["incoerente"] = True
+            v["next_stop"] = entry
 
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates

@@ -115,6 +115,9 @@ class GtfsStaticManager:
         self._route_types: dict = {}    # short_name -> route_type GTFS (0 tram, 1 metro, 3 bus, 7 funicolare)
         self._route_colors: dict = {}  # short_name -> "#RRGGBB" (colori ufficiali GTT)
         self._route_text_colors: dict = {}  # short_name -> "#RRGGBB"
+        self._stops_cache: dict = {}    # stop_id -> {"name", "lat", "lon"} (fermate reali)
+        self._zip_bytes: bytes = b""    # pacchetto GTFS-Static in cache (per stop_times)
+        self._trip_sequences: dict = {} # trip_id -> [(secondi_dalla_mezzanotte, stop_id), ...]
         self._cache_loaded_at: float = 0.0
         self._cache_source: str = "fallback"
         self._lock = asyncio.Lock()
@@ -183,6 +186,61 @@ class GtfsStaticManager:
             return dict(self._route_text_colors)
         return {}
 
+    def get_stops(self) -> dict:
+        """Fermate reali della rete GTT: stop_id -> {"name", "lat", "lon"}.
+
+        Serve per mostrare la PROSSIMA FERMATA di ogni mezzo col nome vero,
+        presa dal GTFS-Static ufficiale. Mai dati inventati.
+        """
+        if self._is_cache_fresh() and self._stops_cache:
+            return self._stops_cache
+        return {}
+
+    def get_trip_sequences(self) -> dict:
+        """Sequenze fermate per corsa: trip_id -> [(secondi, stop_id), ...]."""
+        return self._trip_sequences
+
+    def refresh_trip_sequences(self, trip_ids) -> int:
+        """Costruisce/aggiorna le sequenze fermate SOLO per le corse richieste.
+
+        Il feed GTFS-RT di GTT non pubblica gli stop_id: si risale alla fermata
+        successiva incrociando gli orari programmati (stop_times.txt) con
+        l'orario previsto dal feed real-time. Stream dal pacchetto in cache:
+        mai dati inventati, solo incrocio di dati ufficiali GTT.
+        Da eseguire in un thread (circa 2-4s per passaggio).
+        """
+        wanted = {str(t) for t in trip_ids if t}
+        if not wanted or not self._zip_bytes:
+            return 0
+        added = 0
+        try:
+            with zipfile.ZipFile(io.BytesIO(self._zip_bytes)) as z:
+                if "stop_times.txt" not in z.namelist():
+                    return 0
+                text = io.TextIOWrapper(z.open("stop_times.txt"), encoding="utf-8-sig")
+                reader = csv.DictReader(text)
+                for row in reader:
+                    tid = (row.get("trip_id") or "").strip()
+                    if tid not in wanted or tid in self._trip_sequences:
+                        continue
+                    arr = (row.get("arrival_time") or "").strip()
+                    stop_id = (row.get("stop_id") or "").strip()
+                    if not arr or not stop_id:
+                        continue
+                    try:
+                        hh, mm, ss = (int(p) for p in arr.split(":"))
+                        sched = hh * 3600 + mm * 60 + ss
+                    except (ValueError, TypeError):
+                        continue
+                    self._trip_sequences.setdefault(tid, []).append((sched, stop_id))
+                    added += 1
+        except Exception as exc:
+            logger.warning("stop_times.txt non leggibile (%s): fermate previste non disponibili.", exc)
+        # pulizia: conserva solo le corse richieste piu' quelle recenti
+        if len(self._trip_sequences) > 3000:
+            self._trip_sequences = {k: v for k, v in self._trip_sequences.items() if k in wanted}
+        return added
+
     # ------------------------------------------------------------------
     # Percorso asincrono: scarica il GTFS-Static ufficiale con cache TTL.
     # ------------------------------------------------------------------
@@ -206,6 +264,8 @@ class GtfsStaticManager:
                 self._route_types = routes.get("route_types", {})
                 self._route_colors = routes.get("route_colors", {})
                 self._route_text_colors = routes.get("route_text_colors", {})
+                self._stops_cache = routes.get("stops", {})
+                self._zip_bytes = routes.get("zip_bytes", b"")
                 self._cache_loaded_at = time.time()
                 self._cache_source = "gtfs-static-ufficiale"
                 print(f"✅ [CATALOGO] GTFS-Static ufficiale scaricato: {len(self._routes_cache)} linee reali della rete GTT catalogate.")
@@ -235,6 +295,23 @@ class GtfsStaticManager:
                         print(f"⚠️ [CATALOGO] routes.txt assente nel pacchetto di {url}.")
                         continue
                     content = z.read("routes.txt").decode("utf-8-sig")
+                    stops = {}
+                    if "stops.txt" in z.namelist():
+                        try:
+                            stops_content = z.read("stops.txt").decode("utf-8-sig")
+                            for srow in csv.DictReader(stops_content.splitlines()):
+                                sid = (srow.get("stop_id") or "").strip()
+                                if sid:
+                                    try:
+                                        stops[sid] = {
+                                            "name": (srow.get("stop_name") or "").strip(),
+                                            "lat": float(srow.get("stop_lat") or 0),
+                                            "lon": float(srow.get("stop_lon") or 0),
+                                        }
+                                    except ValueError:
+                                        continue
+                        except Exception as exc:
+                            logger.warning("stops.txt non leggibile (%s): nomi fermate non disponibili.", exc)
 
                 short_names = {}
                 route_id_map = {}
@@ -266,6 +343,8 @@ class GtfsStaticManager:
                         "route_types": route_types,
                         "route_colors": route_colors,
                         "route_text_colors": route_text_colors,
+                        "stops": stops,
+                        "zip_bytes": response.content,
                     }
             except Exception as exc:
                 print(f"⚠️ [CATALOGO] Download fallito da {url}: {exc}")
