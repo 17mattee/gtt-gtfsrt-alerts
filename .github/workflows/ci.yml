@@ -29,4 +29,17 @@ jobs:
 
       - name: Run Ultimate Enterprise QA Test Suite (live GTT feeds)
         run: |
-          python scripts/run_ultimate_check.py
+          # I check finali usano i feed LIVE di GTT: possono essere lenti o
+          # throttling quando molte PR girano in parallelo. Un singolo hiccup
+          # di rete non deve far fallire la CI (bloccherebbe l'auto-merge):
+          # 3 tentativi con pausa prima di dichiarare fallimento reale.
+          for attempt in 1 2 3; do
+            if python scripts/run_ultimate_check.py; then
+              echo "QA suite superata al tentativo $attempt."
+              exit 0
+            fi
+            echo "Tentativo $attempt fallito: attesa 45s prima di riprovare (feed live GTT)..."
+            sleep 45
+          done
+          echo "QA suite fallita dopo 3 tentativi: aggiornamento realmente difettoso."
+          exit 1
