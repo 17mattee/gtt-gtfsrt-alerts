@@ -257,7 +257,7 @@
             const types = (lastData && lastData.route_types) || {};
             if (r in types) return types[r];
             if (/^m/i.test(r)) return 1;
-            if (['3', '4', '7', '8', '9', '10', '15', '16', '18'].includes(r) || /^star/i.test(r)) return 0;
+            if (['3', '4', '7', '9', '10', '13', '15', '16'].includes(r) || /^star/i.test(r)) return 0;
             return 3;
         }
         const TYPE_LABEL = { 1: 'Metro', 0: 'Tram', 7: 'Funicolare', 3: 'Bus' };
@@ -389,7 +389,7 @@
 
         function vehiclePopup(v, routesCatalog, alerts) {
             const delay = v.delay_seconds ?? 0;
-            const gpsAge = v.timestamp ? Math.round(Date.now() / 1000 - Number(v.timestamp)) : null;
+            const gpsAge = v.timestamp ? Math.max(0, Math.round(Date.now() / 1000 - Number(v.timestamp))) : null;
             const gpsTime = v.timestamp ? new Date(Number(v.timestamp) * 1000).toLocaleTimeString('it-IT') : 'n/d';
             const lineAlerts = alerts.filter(al => (al.affected_routes || []).includes(v.route_id));
             const devOnLine = lineAlerts.filter(al => al.category === 'deviazione').length;

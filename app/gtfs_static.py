@@ -39,7 +39,7 @@ FALLBACK_ROUTES = {
     "10": "Tram - Piazza Statuto / Vallette",
     "15": "Tram - Sassi / Via Senatore Ghedini",
     "16": "Tram - Piazza Sabotino / Piazza Risorgimento",
-    "18": "Tram - Piazza Massaua / Via Lombardia",
+    "18": "Bus - Piazza Massaua / Via Lombardia",
     "1": "Bus - Piazza Carlo Emanuele II / Via Gaidano",
     "2": "Bus - Piazza Sofia / Via Pio VII",
     "5": "Bus - Piazza Carlo Emanuele II / Corso Grosseto",
@@ -169,7 +169,9 @@ class GtfsStaticManager:
         if self._is_cache_fresh() and self._route_types:
             return dict(self._route_types)
         fallback = dict.fromkeys(FALLBACK_ROUTES, 3)
-        for tram in ["3", "4", "7", "8", "9", "10", "15", "16", "18"]:
+        # Tram UFFICIALI della rete GTT attuale (route_type=0 del GTFS):
+        # la linea 8 e la 18 sono BUS, non tram. Fonte: routes.txt GTT.
+        for tram in ["3", "4", "7", "9", "10", "13", "15", "16", "16 CD", "16 CS"]:
             fallback[tram] = 0
         fallback["M1"] = 1
         return fallback

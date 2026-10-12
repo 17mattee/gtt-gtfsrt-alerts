@@ -87,6 +87,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+For development and tests: `pip install -r requirements-dev.txt`.
+
 Open **http://127.0.0.1:8000** — the map fills with real vehicles in seconds.
 
 ### Docker

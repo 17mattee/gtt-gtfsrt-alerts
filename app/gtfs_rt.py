@@ -125,6 +125,7 @@ _WEEKDAY_OR_MONTH = (
 
 def _parse_itinerary(body: str) -> dict:
     """Estrae punto di deviazione, elenco delle vie e ritorno al percorso regolare."""
+    body = (body or "").strip()
     da, streets_txt = None, None
     m = re.search(r"^(?:da\s+)?(.+?)\s+(?:devia|prosegue)\s+(?:per|attraverso)\s+(.+)$", body, re.IGNORECASE | re.DOTALL)
     if m:
@@ -185,16 +186,22 @@ def _parse_detour_details(header: str, description: str):
                 out["motivo"] = seg.rstrip(".,;")
                 continue
 
-            # Itinerario senza direzione esplicita (mono-direzionale)
-            if out["itinerario"] is None and re.search(r"\b(devia|prosegue|per)\b", low) and ("percorso" in low or "via" in low or "corso" in low or "piazza" in low):
+            # Rinvio al sito GTT: verificato PRIMA dell'itinerario (il testo
+            # "Per conoscere la deviazione..." verrebbe altrimenti scambiato
+            # per un itinerario perche' "deviazione" contiene "via").
+            if "www.gtt" in low or "consulta la sezione" in low:
+                out["fonte_esterna"] = True
+                continue
+
+            # Itinerario senza direzione esplicita (mono-direzionale).
+            # Le parole delle vie usano confini di parola: "via" deve essere una
+            # parola intera, non dentro "deviazione".
+            if out["itinerario"] is None and re.search(r"\b(devia|prosegue|per)\b", low) and re.search(r"\b(via|corso|piazza|piazzale|viale|largo)\b", low):
                 itinerary = _parse_itinerary(seg)
                 if itinerary["strade"]:
                     itinerary["nome"] = header_dir
                     out["itinerario"] = itinerary
                 continue
-
-            if "www.gtt" in low or "consulta" in low:
-                out["fonte_esterna"] = True
 
         # se c'e' una sola direzione e l'itinerario e' vuoto, riusa l'itinerario singolo
         if out["direzioni"] and not out["itinerario"] and header_dir and len(out["direzioni"]) == 1:

@@ -87,6 +87,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+Per sviluppo e test: `pip install -r requirements-dev.txt`.
+
 Apri **http://127.0.0.1:8000** — la mappa si riempie di mezzi reali in pochi secondi.
 
 ### Docker
