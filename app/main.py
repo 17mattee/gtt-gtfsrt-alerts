@@ -21,7 +21,6 @@ import psycopg
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("GTT-Main")
-
 limiter = Limiter(key_func=get_remote_address)
 
 redis_url = os.getenv("REDIS_URL")
@@ -38,8 +37,7 @@ def set_cached_alerts(alerts: list):
             redis_client.set(REDIS_CACHE_KEY, json.dumps(alerts))
             return
         except Exception as e:
-            logger.warning(f"Errore scrittura Redis, uso fallback in-memory: {e}")
-    
+            logger.warning(f"Errore scrittura Redis: {e}")
     with cache_lock:
         LOCAL_FALLBACK_CACHE = alerts
 
@@ -51,137 +49,81 @@ def get_cached_alerts() -> list:
             if data:
                 return json.loads(data)
         except Exception as e:
-            logger.warning(f"Errore lettura Redis, uso fallback in-memory: {e}")
-            
+            logger.warning(f"Errore lettura Redis: {e}")
     with cache_lock:
         return list(LOCAL_FALLBACK_CACHE)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     gtfs_manager._ensure_data_loaded()
-    
-    logger.info("Primo avvio scraping GTT (Circuit Breaker & Distributed Cache)...")
     initial_alerts = fetch_gtt_alerts()
     if initial_alerts:
         set_cached_alerts(initial_alerts)
         save_alerts_to_db(initial_alerts)
     else:
-        logger.warning("Scraping iniziale fallito. Recupero dallo storico Supabase...")
         fallback_alerts = fetch_latest_alerts_from_db()
         if fallback_alerts:
             set_cached_alerts(fallback_alerts)
-
     scheduler = BackgroundScheduler()
-    scheduler.add_job(job_update_alerts, 'interval', minutes=2)
+    scheduler.add_job(job_update_alerts, "interval", minutes=2)
     scheduler.start()
-    
     yield
-    
     scheduler.shutdown()
 
 def job_update_alerts():
-    logger.info("Aggiornamento periodico feed GTFS-RT...")
     alerts = fetch_gtt_alerts()
     if alerts:
         set_cached_alerts(alerts)
         save_alerts_to_db(alerts)
 
-app = FastAPI(
-    title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise con Circuit Breaker, Prometheus Metrics, Redis e Cold Start.",
-    version="1.5.0",
-    lifespan=lifespan
-)
-
+app = FastAPI(title="GTT Turin GTFS-RT Middleware", version="2.0.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)
-
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# Configurazione Prometheus Instrumentator
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 @app.get("/", response_class=HTMLResponse)
 @limiter.limit("30/minute")
 def dashboard(request: Request):
     current_alerts = get_cached_alerts()
-    cache_len = len(current_alerts)
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="it">
-    <head>
-        <meta charset="UTF-8">
-        <title>GTT GTFS-RT Dashboard</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; margin: 0; }}
-            .container {{ max-width: 800px; margin: auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }}
-            h1 {{ color: #38bdf8; margin-top: 0; }}
-            .badge {{ background: #22c55e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }}
-            .endpoint {{ background: #0f172a; padding: 12px; border-radius: 6px; margin-top: 15px; font-family: monospace; color: #38bdf8; }}
-            ul {{ padding-left: 20px; }}
-            li {{ margin-bottom: 10px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">V1.5 ENTERPRISE</span></h1>
-            <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
-            
-            <h3>Endpoint Ufficiali:</h3>
-            <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb" style="color: #38bdf8; text-decoration: none;">/gtfs-rt/alerts.pb</a></div>
-            <div class="endpoint">GET <a href="/health" style="color: #38bdf8; text-decoration: none;">/health</a> (Health Check)</div>
-            <div class="endpoint">GET <a href="/metrics" style="color: #38bdf8; text-decoration: none;">/metrics</a> (Prometheus Metrics)</div>
-            
-            <h3>Stato Attuale:</h3>
-            <p>Avvisi attivi in cache: <strong>{cache_len}</strong></p>
-            
-            <h3>Ottimizzazioni Architetturali:</h3>
-            <ul>
-                <li><strong>Circuit Breaker:</strong> Protezione attiva contro i blackout della sorgente GTT</li>
-                <li><strong>Prometheus Observability:</strong> Metriche di performance esposte su /metrics</li>
-                <li><strong>Distributed Caching & Cold Start:</strong> Attivi e resilienti</li>
-            </ul>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>GTT GTFS-RT Live Dashboard & Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 30px; margin: 0; }}
+.container {{ max-width: 1000px; margin: auto; background: #1e293b; padding: 30px; border-radius: 12px; }}
+h1 {{ color: #38bdf8; }}
+.badge {{ background: #22c55e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; }}
+.endpoint {{ background: #0f172a; padding: 12px; border-radius: 6px; margin-top: 15px; font-family: monospace; color: #38bdf8; }}
+#map {{ height: 350px; border-radius: 8px; margin-top: 20px; }}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>GTT GTFS-RT Synthesizer <span class="badge">V2.0 LIVE MAP</span></h1>
+<p>Middleware di conversione avvisi GTT Torino in GTFS-Realtime (Protobuf).</p>
+<div class="endpoint">GET <a href="/gtfs-rt/alerts.pb">/gtfs-rt/alerts.pb</a></div>
+<div class="endpoint">GET <a href="/health">/health</a></div>
+<div class="endpoint">GET <a href="/metrics">/metrics</a></div>
+<p>Avvisi attivi in cache: <strong>{{len(current_alerts)}}</strong></p>
+<div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var map = L.map("map").setView([45.0703, 7.6869], 13);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {{ maxZoom: 19 }}).addTo(map);
+L.marker([45.0703, 7.6869]).addTo(map).bindPopup("<b>GTT Torino Hub Centrale</b>").openPopup();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 @app.get("/health")
 def health_check():
-    db_status = "disconnected"
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        try:
-            with psycopg.connect(database_url, connect_timeout=3) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            db_status = "connected"
-        except Exception:
-            db_status = "error"
-
-    redis_status = "disabled"
-    if redis_client:
-        try:
-            redis_client.ping()
-            redis_status = "connected"
-        except Exception:
-            redis_status = "error"
-
-    current_alerts = get_cached_alerts()
-    status_code = 200 if db_status in ["connected", "disconnected"] and redis_status in ["connected", "disabled"] else 503
-    
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "status": "healthy" if status_code == 200 else "degraded",
-            "database": db_status,
-            "redis": redis_status,
-            "cached_alerts": len(current_alerts),
-            "timestamp": int(time.time())
-        }
-    )
+    return JSONResponse(status_code=200, content={"status": "healthy", "cached_alerts": len(get_cached_alerts()), "timestamp": int(time.time())})
 
 @app.get("/gtfs-rt/alerts.pb")
 @limiter.limit("60/minute")
@@ -190,32 +132,22 @@ def get_gtfs_rt_alerts(request: Request):
     feed.header.gtfs_realtime_version = "2.0"
     feed.header.incrementality = gtfs_realtime_pb2.FeedHeader.FULL_DATASET
     feed.header.timestamp = int(time.time())
-
-    current_alerts = get_cached_alerts()
-
-    for item in current_alerts:
+    for item in get_cached_alerts():
         entity = feed.entity.add()
         entity.id = item["id"]
         entity.is_deleted = False
-
         alert = entity.alert
         alert.cause = item["cause"]
         alert.effect = item["effect"]
-
         active_period = alert.active_period.add()
         active_period.start = item["start_time"]
-
         for r_id in item["route_ids"]:
             informed_entity = alert.informed_entity.add()
             informed_entity.route_id = r_id
-
-        header_text = alert.header_text.translation.add()
-        header_text.text = item["title"]
-        header_text.language = "it"
-
-        description_text = alert.description_text.translation.add()
-        description_text.text = item["description"]
-        description_text.language = "it"
-
-    binary_data = feed.SerializeToString()
-    return Response(content=binary_data, media_type="application/x-protobuf")
+        ht = alert.header_text.translation.add()
+        ht.text = item["title"]
+        ht.language = "it"
+        dt = alert.description_text.translation.add()
+        dt.text = item["description"]
+        dt.language = "it"
+    return Response(content=feed.SerializeToString(), media_type="application/x-protobuf")

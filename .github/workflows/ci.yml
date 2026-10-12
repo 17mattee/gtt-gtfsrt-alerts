@@ -2,9 +2,9 @@ name: CI/CD Pipeline - GTT GTFS-RT
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   test:
@@ -24,6 +24,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Pytest with Coverage
+    - name: Run Pytest with Coverage Report
       run: |
-        pytest --cov=app -v
+        pytest --cov=app --cov-report=xml -v
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

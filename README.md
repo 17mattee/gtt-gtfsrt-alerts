@@ -63,11 +63,15 @@ gtt-gtfsrt-alerts/
 └── README.md
 
 
+
+
+
 🚀 Quick Start & Installation
 
 Clone the repository:
 git clone [https://github.com/17mattee/gtt-gtfsrt-alerts.git](https://github.com/17mattee/gtt-gtfsrt-alerts.git)
 cd gtt-gtfsrt-alerts
+
 Create and activate a virtual environment:
 python3 -m venv venv
 source venv/bin/activate
