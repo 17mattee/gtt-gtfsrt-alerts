@@ -70,8 +70,26 @@ jobs:
           fi
           echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
 
+      - name: Solo aggiornamenti pip (requirements*.txt)
+        if: steps.find.outputs.skip != 'true'
+        id: files
+        run: |
+          PR_NUMBER=${{ steps.find.outputs.number }}
+          FILES=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/files?per_page=100" --jq '.[].filename')
+          echo "File toccati dalla PR:"
+          echo "$FILES"
+          # Auto-merge SOLO per dipendenze pip: Dockerfile (immagine base python),
+          # workflow GitHub e qualunque altro file restano a revisione manuale.
+          BAD=$(echo "$FILES" | grep -v '^requirements.*\.txt$' || true)
+          if [ -n "$BAD" ]; then
+            echo "La PR tocca file fuori da requirements: revisione manuale."
+            echo "safe=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "safe=yes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Unisci la PR (squash)
-        if: steps.find.outputs.skip != 'true' && steps.safe.outputs.safe == 'yes'
+        if: steps.find.outputs.skip != 'true' && steps.safe.outputs.safe == 'yes' && steps.files.outputs.safe == 'yes'
         run: |
           PR_NUMBER=${{ steps.find.outputs.number }}
           echo "Auto-unione PR #$PR_NUMBER (CI verde, bump patch/minor)..."
