@@ -1,8 +1,8 @@
 import time
 import logging
 import threading
-from fastapi import FastAPI, Request
-from fastapi.responses import Response, HTMLResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -13,6 +13,8 @@ from app.database import save_alerts_to_db
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import os
+import psycopg
 
 # Configurazione Logging Strutturato
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -21,7 +23,7 @@ logger = logging.getLogger("GTT-Main")
 limiter = Limiter(key_func=get_remote_address)
 
 ALERTS_DATA_CACHE = []
-cache_lock = threading.Lock()  # Thread Lock per prevenire race conditions
+cache_lock = threading.Lock()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,12 +57,11 @@ def job_update_alerts():
 
 app = FastAPI(
     title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise ad alta affidabilità con Gzip, Thread Locking e Storico Supabase.",
-    version="1.1.0",
+    description="Middleware enterprise ad alta affidabilità con Gzip, Thread Locking, Health Check e Storico Supabase.",
+    version="1.2.0",
     lifespan=lifespan
 )
 
-# Abilitazione compressione Gzip per ridurre la latenza di rete
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
@@ -90,19 +91,20 @@ def dashboard(request: Request):
     </head>
     <body>
         <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">OPTIMIZED & SECURED</span></h1>
+            <h1>GTT GTFS-RT Middleware <span class="badge">PRODUCTION READY</span></h1>
             <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
             
-            <h3>Endpoint Protobuf Ufficiale:</h3>
+            <h3>Endpoint Ufficiali:</h3>
             <div class="endpoint">GET <a href="/gtfs-rt/alerts.pb" style="color: #38bdf8; text-decoration: none;">/gtfs-rt/alerts.pb</a></div>
+            <div class="endpoint">GET <a href="/health" style="color: #38bdf8; text-decoration: none;">/health</a> (Health Check)</div>
             
             <h3>Stato Attuale:</h3>
             <p>Avvisi attivi processati in memoria: <strong>{cache_len}</strong></p>
             
-            <h3>Ottimizzazioni Architetturali:</h3>
+            <h3>Ottomizzazioni Architetturali:</h3>
             <ul>
-                <li><strong>Gzip Compression:</strong> Attiva (Payload alleggeriti)</li>
-                <li><strong>Thread Safety (Locking):</strong> Attivo (Zero Race Conditions)</li>
+                <li><strong>Health Check Avanzato:</strong> Diagnostica DB e Cache</li>
+                <li><strong>Gzip Compression & Thread Locking:</strong> Attivi</li>
                 <li><strong>Rate Limiting & Retries:</strong> Attivi e protetti</li>
                 <li><strong>Persistence:</strong> Storico PostgreSQL permanente su Supabase</li>
             </ul>
@@ -111,6 +113,33 @@ def dashboard(request: Request):
     </html>
     """
     return HTMLResponse(content=html_content)
+
+@app.get("/health")
+def health_check():
+    db_status = "disconnected"
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            with psycopg.connect(database_url, connect_timeout=3) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            db_status = "connected"
+        except Exception:
+            db_status = "error"
+
+    with cache_lock:
+        cache_size = len(ALERTS_DATA_CACHE)
+
+    status_code = 200 if db_status in ["connected", "disconnected"] else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if status_code == 200 else "degraded",
+            "database": db_status,
+            "cached_alerts": cache_size,
+            "timestamp": int(time.time())
+        }
+    )
 
 @app.get("/gtfs-rt/alerts.pb")
 @limiter.limit("60/minute")
