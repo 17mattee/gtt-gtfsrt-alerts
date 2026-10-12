@@ -1,6 +1,9 @@
 import time
 import logging
 import threading
+import json
+import os
+import redis
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
@@ -13,7 +16,6 @@ from app.database import save_alerts_to_db, fetch_latest_alerts_from_db
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-import os
 import psycopg
 
 # Configurazione Logging Strutturato
@@ -22,28 +24,54 @@ logger = logging.getLogger("GTT-Main")
 
 limiter = Limiter(key_func=get_remote_address)
 
-ALERTS_DATA_CACHE = []
+# Configurazione Redis Client (opzionale con fallback in-memory)
+redis_url = os.getenv("REDIS_URL")
+redis_client = redis.Redis.from_url(redis_url, decode_responses=True) if redis_url else None
+
+LOCAL_FALLBACK_CACHE = []
 cache_lock = threading.Lock()
+REDIS_CACHE_KEY = "gtt_rt_alerts_cache"
+
+def set_cached_alerts(alerts: list):
+    global LOCAL_FALLBACK_CACHE
+    if redis_client:
+        try:
+            redis_client.set(REDIS_CACHE_KEY, json.dumps(alerts))
+            return
+        except Exception as e:
+            logger.warning(f"Errore scrittura Redis, uso fallback in-memory: {e}")
+    
+    with cache_lock:
+        LOCAL_FALLBACK_CACHE = alerts
+
+def get_cached_alerts() -> list:
+    global LOCAL_FALLBACK_CACHE
+    if redis_client:
+        try:
+            data = redis_client.get(REDIS_CACHE_KEY)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logger.warning(f"Errore lettura Redis, uso fallback in-memory: {e}")
+            
+    with cache_lock:
+        return list(LOCAL_FALLBACK_CACHE)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     gtfs_manager._ensure_data_loaded()
     
-    global ALERTS_DATA_CACHE
-    logger.info("Primo avvio scraping GTT (Cold Start Resilience)...")
-    
+    logger.info("Primo avvio scraping GTT (Distributed Cache & Cold Start)...")
     initial_alerts = fetch_gtt_alerts()
     if initial_alerts:
-        with cache_lock:
-            ALERTS_DATA_CACHE = initial_alerts
+        set_cached_alerts(initial_alerts)
         save_alerts_to_db(initial_alerts)
     else:
         logger.warning("Scraping iniziale fallito o vuoto. Tentativo di recupero dallo storico Supabase...")
         fallback_alerts = fetch_latest_alerts_from_db()
         if fallback_alerts:
-            with cache_lock:
-                ALERTS_DATA_CACHE = fallback_alerts
-            logger.info(f"Ripristinati {len(fallback_alerts)} avvisi dallo storico Supabase con successo.")
+            set_cached_alerts(fallback_alerts)
+            logger.info(f"Ripristinati {len(fallback_alerts)} avvisi dallo storico Supabase.")
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(job_update_alerts, 'interval', minutes=2)
@@ -54,19 +82,17 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 def job_update_alerts():
-    global ALERTS_DATA_CACHE
-    logger.info("Aggiornamento periodico feed GTFS-RT...")
+    logger.info("Aggiornamento periodico feed GTFS-RT (Distributed Cache)...")
     alerts = fetch_gtt_alerts()
     if alerts:
-        with cache_lock:
-            ALERTS_DATA_CACHE = alerts
+        set_cached_alerts(alerts)
         save_alerts_to_db(alerts)
         logger.info(f"Feed aggiornato con {len(alerts)} avvisi.")
 
 app = FastAPI(
     title="GTT Turin GTFS-RT Middleware",
-    description="Middleware enterprise ad alta affidabilità con Cold Start Resiliency, Gzip e Thread Locking.",
-    version="1.3.0",
+    description="Middleware enterprise ad alta affidabilità con Redis Distributed Caching, Cold Start Resiliency e Gzip.",
+    version="1.4.0",
     lifespan=lifespan
 )
 
@@ -78,8 +104,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.get("/", response_class=HTMLResponse)
 @limiter.limit("30/minute")
 def dashboard(request: Request):
-    with cache_lock:
-        cache_len = len(ALERTS_DATA_CACHE)
+    current_alerts = get_cached_alerts()
+    cache_len = len(current_alerts)
+    cache_backend = "Redis Distributed Cache" if redis_client else "In-Memory Thread-Safe Cache"
 
     html_content = f"""
     <!DOCTYPE html>
@@ -99,7 +126,7 @@ def dashboard(request: Request):
     </head>
     <body>
         <div class="container">
-            <h1>GTT GTFS-RT Middleware <span class="badge">V1.3 RESILIENT</span></h1>
+            <h1>GTT GTFS-RT Middleware <span class="badge">V1.4 REDIS READY</span></h1>
             <p>Sistema di traduzione in tempo reale degli avvisi GTT Torino nello standard internazionale GTFS-Realtime.</p>
             
             <h3>Endpoint Ufficiali:</h3>
@@ -107,14 +134,15 @@ def dashboard(request: Request):
             <div class="endpoint">GET <a href="/health" style="color: #38bdf8; text-decoration: none;">/health</a> (Health Check)</div>
             
             <h3>Stato Attuale:</h3>
-            <p>Avvisi attivi in cache (con Cold Start di sicurezza): <strong>{cache_len}</strong></p>
+            <p>Avvisi attivi in cache: <strong>{cache_len}</strong></p>
+            <p>Backend di Caching: <strong>{cache_backend}</strong></p>
             
             <h3>Ottimizzazioni Architetturali:</h3>
             <ul>
-                <li><strong>Cold Start Resiliency:</strong> Ricarica automatica da DB in caso di down temporaneo</li>
+                <li><strong>Distributed Caching:</strong> Integrazione Redis con fallback automatico</li>
+                <li><strong>Cold Start Resiliency:</strong> Ricarica automatica da DB in caso di down</li>
                 <li><strong>Gzip Compression & Thread Locking:</strong> Attivi</li>
                 <li><strong>Rate Limiting & Retries:</strong> Attivi e protetti</li>
-                <li><strong>Persistence:</strong> Storico PostgreSQL permanente su Supabase</li>
             </ul>
         </div>
     </body>
@@ -135,16 +163,24 @@ def health_check():
         except Exception:
             db_status = "error"
 
-    with cache_lock:
-        cache_size = len(ALERTS_DATA_CACHE)
+    redis_status = "disabled"
+    if redis_client:
+        try:
+            redis_client.ping()
+            redis_status = "connected"
+        except Exception:
+            redis_status = "error"
 
-    status_code = 200 if db_status in ["connected", "disconnected"] else 503
+    current_alerts = get_cached_alerts()
+    status_code = 200 if db_status in ["connected", "disconnected"] and redis_status in ["connected", "disabled"] else 503
+    
     return JSONResponse(
         status_code=status_code,
         content={
             "status": "healthy" if status_code == 200 else "degraded",
             "database": db_status,
-            "cached_alerts": cache_size,
+            "redis": redis_status,
+            "cached_alerts": len(current_alerts),
             "timestamp": int(time.time())
         }
     )
@@ -157,8 +193,7 @@ def get_gtfs_rt_alerts(request: Request):
     feed.header.incrementality = gtfs_realtime_pb2.FeedHeader.FULL_DATASET
     feed.header.timestamp = int(time.time())
 
-    with cache_lock:
-        current_alerts = list(ALERTS_DATA_CACHE)
+    current_alerts = get_cached_alerts()
 
     for item in current_alerts:
         entity = feed.entity.add()

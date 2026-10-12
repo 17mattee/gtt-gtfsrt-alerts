@@ -12,3 +12,4 @@ slowapi==0.1.9
 tenacity==9.0.0
 responses==0.25.6
 pytest-cov==6.0.0
+redis==5.2.0
