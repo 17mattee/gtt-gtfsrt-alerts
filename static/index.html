@@ -99,6 +99,7 @@
         .card.d-late { border-left: 3px solid var(--late); }
         .card strong { color: var(--text); display: block; font-size: 0.83rem; font-weight: 600; }
         .card span { color: var(--text-2); font-size: 0.74rem; }
+        .card .card-info { white-space: nowrap; }
 
         .line-badge { min-width: 40px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; flex-shrink: 0; padding: 0 6px; }
 
@@ -124,35 +125,54 @@
         /* ---------- Smartphone ---------- */
         @media (max-width: 820px) {
             /* Header: compatto, due righe (brand + KPI scorrevoli) */
-            header { height: auto; flex-wrap: wrap; padding: 6px 10px; gap: 4px 10px; }
-            .brand .mark { font-size: 0.75rem; padding: 4px 6px; }
-            .brand h1 { font-size: 0.82rem; }
+            header { height: auto; flex-wrap: wrap; padding: 7px 10px; gap: 4px 10px; }
+            .brand .mark { font-size: 0.8rem; padding: 5px 7px; }
+            .brand h1 { font-size: 0.9rem; }
             .brand p { display: none; }
-            .kpis { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 12px; padding-bottom: 2px; }
+            .kpis { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 14px; padding-bottom: 2px; }
             .kpis::-webkit-scrollbar { display: none; }
             .kpi { text-align: left; flex-shrink: 0; }
-            .kpi b { font-size: 0.78rem; }
-            .kpi label { font-size: 0.5rem; }
+            .kpi b { font-size: 0.86rem; }
+            .kpi label { font-size: 0.54rem; }
 
             /* Corpo: mappa sopra (40% dello schermo), pannello sotto con piu' spazio */
             main { flex-direction: column-reverse; }
             #map { flex: none; height: 40vh; }
             aside { width: 100%; flex: 1; min-height: 0; border-right: none; border-top: 1px solid var(--border); }
 
+            /* Statusbar nascosta quando tutto va bene (riga "Dati ufficiali…"):
+               riappare da sola SOLO per problemi reali (feed, riconnessione, tiles). */
+            .statusbar { display: none; }
+            .statusbar.important { display: flex; padding-bottom: calc(9px + env(safe-area-inset-bottom)); }
+
             /* Selettore linee: UNA striscia orizzontale a scorrimento (un dito per
                scorrere tutte le linee, zero spazio verticale rubato) */
-            .lines-panel { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 5px; padding: 8px 10px; scrollbar-width: none; max-height: none; }
+            .lines-panel { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 6px; padding: 9px 10px; scrollbar-width: none; max-height: none; border-bottom: 1px solid var(--border-soft); }
             .lines-panel::-webkit-scrollbar { display: none; }
             .lines-panel .group-label { display: none; }
             .lines-panel .chip-row { display: contents; }
-            .chip { flex-shrink: 0; height: 30px; min-width: 40px; font-size: 0.78rem; }
-            .chip.all-chip { flex-shrink: 0; }
+            .chip { flex-shrink: 0; height: 34px; min-width: 44px; font-size: 0.84rem; border-radius: 8px; }
+            .chip.all-chip { flex-shrink: 0; padding: 0 12px; }
 
-            /* Barra di ricerca e card piu' compatte */
-            .filter-bar { padding: 7px 10px; }
-            .feed-section { padding: 8px 10px 14px; }
-            .card { padding: 8px 9px; }
-            .statusbar { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+            /* Ricerca: input a 16px -> iOS NON fa l'auto-zoom al focus */
+            .filter-bar { padding: 8px 10px; }
+            .filter-bar input { font-size: 16px; padding: 9px 12px; border-radius: 8px; }
+
+            /* LEGGIBILITA' CARD: font piu' grandi, area di tocco >= 44px,
+               piu' respiro tra una card e l'altra, testo che va a capo */
+            .feed-section { padding: 10px 12px 18px; }
+            .card { padding: 11px 12px; margin-bottom: 8px; border-radius: 10px; min-height: 46px; }
+            .card strong { font-size: 0.9rem; }
+            .card span { font-size: 0.82rem; line-height: 1.35; }
+            .card .card-info { white-space: normal; text-align: right; }
+            .line-badge { min-width: 44px; height: 30px; font-size: 0.86rem; border-radius: 7px; }
+            .line-group-title { font-size: 0.7rem; margin: 16px 2px 8px; }
+            .card.alert, .card.detour { padding: 12px 13px; }
+            .card.alert strong, .card.detour strong { font-size: 0.92rem; }
+            .card.alert span, .card.detour span { font-size: 0.84rem; line-height: 1.45; }
+
+            /* Tab piu' alte e leggibili col pollice */
+            .tab-btn { padding: 13px 4px; font-size: 0.85rem; }
 
             /* Popup della mappa mai piu' largo dello schermo */
             .leaflet-popup-content { max-width: 230px !important; }
@@ -235,8 +255,7 @@
         tileLayer.on('tileerror', () => {
             tileErrors++;
             if (tileErrors === 3) {
-                const bar = document.getElementById('ws-status');
-                bar.innerHTML = '⚠️ Le tiles della mappa non si caricano: controlla la connessione o un eventuale blocco delle immagini di tile.openstreetmap.org.';
+                setStatus('⚠️ Le tiles della mappa non si caricano: controlla la connessione o un eventuale blocco delle immagini di tile.openstreetmap.org.', true);
             }
         });
 
@@ -373,7 +392,7 @@
             ws.onclose = () => {
                 const delay = Math.min(3000 * (reconnectAttempts + 1), 15000);
                 setLive('warn', 'Riconnessione ' + (delay / 1000) + 's');
-                document.getElementById('ws-status').innerText = 'Riconnessione automatica tra ' + (delay / 1000) + ' secondi…';
+                setStatus('Riconnessione automatica tra ' + (delay / 1000) + ' secondi…', true);
                 reconnectAttempts++;
                 setTimeout(connectWebSocket, delay);
             };
@@ -398,6 +417,14 @@
             const el = document.getElementById('ws-live');
             el.className = 'live' + (state === 'ok' ? '' : ' ' + state);
             document.getElementById('live-text').innerText = text;
+        }
+
+        // Statusbar: visibile sempre su desktop, su mobile SOLO se c'e' un
+        // problema reale (feed offline, riconnessione, tiles bloccate).
+        function setStatus(html, important) {
+            const bar = document.getElementById('ws-status');
+            bar.innerHTML = html;
+            bar.classList.toggle('important', !!important);
         }
 
         /* ---------- Formattazione: testo e colore sempre coerenti ---------- */
@@ -502,14 +529,13 @@
             setLive(unavailable ? 'off' : degraded || delaysDown ? 'warn' : 'ok',
                     unavailable ? 'OFFLINE' : degraded ? 'FEED DEGRADATO' : delaysDown ? 'RITARDI N/D' : 'LIVE');
 
-            document.getElementById('ws-status').innerHTML = unavailable
-                ? 'Feed posizioni GTT non raggiungibile: la mappa si repopola appena GTT riprende a trasmettere.'
-                : degraded
-                ? 'GTT sta pubblicando pochi mezzi in questo momento (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse.'
-                : delaysDown
-                ? 'Feed ritardi GTT non disponibile: i ritardi tornano appena GTT riprende a trasmetterli.'
+            setStatus(
+                unavailable ? 'Feed posizioni GTT non raggiungibile: la mappa si repopola appena GTT riprende a trasmettere.'
+                : degraded ? 'GTT sta pubblicando pochi mezzi in questo momento (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse.'
+                : delaysDown ? 'Feed ritardi GTT non disponibile: i ritardi tornano appena GTT riprende a trasmetterli.'
                 : live ? 'Dati ufficiali GTT in tempo reale · ' + vehicles.length + ' mezzi · ' + alerts.length + ' avvisi'
-                : 'In attesa dei feed GTT…';
+                : 'In attesa dei feed GTT…',
+                !!(unavailable || degraded || delaysDown));
 
             /* --- Mappa: con una linea selezionata si vedono SOLO i suoi mezzi --- */
             renderingMarkers = true;
@@ -652,7 +678,7 @@
                     const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;min-width:0;"><strong>Mezzo ${esc(v.vehicle_id)}${v.headsign ? ' → ' + esc(v.headsign) : ''}</strong></div>
-                        <span style="white-space:nowrap;">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${gpsStale ? ' · GPS datato' : ''}</span>
+                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${gpsStale ? ' · GPS datato' : ''}</span>
                     </div>`;
                 }
             }
