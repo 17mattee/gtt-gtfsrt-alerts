@@ -334,3 +334,26 @@ def test_catalogo_stale_durante_outage_totale():
     assert gtfs_manager._cache_loaded_at > 0, "cache ri-datata: niente download a ogni ciclo"
     gtfs_manager._routes_cache = {}
     gtfs_manager._cache_source = "fallback"
+
+
+def test_news_monitor_filtro_parole_chiave():
+    """Il monitor notizie seleziona solo cio' che impatta la mobilita'."""
+    import app.news_monitor as nm
+
+    rss = b"""<?xml version="1.0"?><rss><channel>
+    <item><title>Sciopero GTT giovedi: corriera e bus fermi</title><link>https://esempio.it/1</link><pubDate>Tue, 13 Oct 2026 10:00:00 +0200</pubDate><description>Agitazione sindacale dei lavoratori</description></item>
+    <item><title>Corteo in centro: deviazioni del traffico</title><link>https://esempio.it/2</link><pubDate>Tue, 13 Oct 2026 11:00:00 +0200</pubDate><description>Manifestazione in piazza</description></item>
+    <item><title>Vince il talent show la squadra preferita</title><link>https://esempio.it/3</link><pubDate>Tue, 13 Oct 2026 12:00:00 +0200</pubDate><description>Serata televisiva</description></item>
+    </channel></rss>"""
+    items = nm._parse_rss(rss)
+    assert len(items) == 3
+    relevant = nm._filter_relevant(items)
+    titoli = {i["titolo"][:20] for i in relevant}
+    assert any("Sciopero" in t for t in titoli), "lo sciopero deve restare"
+    assert any("Corteo" in t for t in titoli), "il corteo deve restare"
+    assert not any("talent" in t for t in titoli), "la TV non c'entra con la mobilita'"
+    # le parole chiave sono registrate
+    sciopero = next(i for i in relevant if "Sciopero" in i["titolo"])
+    assert any("sciopero" in k for k in sciopero["parole_chiave"])
+    # RSS malformato: mai eccezioni
+    assert nm._parse_rss(b"<rss>rotto") == []

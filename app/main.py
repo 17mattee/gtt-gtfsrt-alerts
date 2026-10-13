@@ -318,6 +318,7 @@ async def websocket_endpoint(websocket: WebSocket):
             dynamic = {
                 "vehicles": payload.get("vehicles", []),
                 "trip_updates": payload.get("trip_updates", []),
+                "scioperi": payload.get("scioperi", {"ufficiali": [], "notizie": []}),
                 "meta": payload.get("meta", {}),
             }
             static_part = {

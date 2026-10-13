@@ -233,6 +233,7 @@
                 <button class="tab-btn active" onclick="switchTab('vehicles-tab', this)">Flotta</button>
                 <button class="tab-btn" onclick="switchTab('delays-tab', this)">Ritardi</button>
                 <button class="tab-btn" onclick="switchTab('alerts-tab', this)">Avvisi &amp; Deviazioni</button>
+                <button class="tab-btn" onclick="switchTab('strikes-tab', this)">Scioperi &amp; Eventi</button>
             </div>
 
             <div id="vehicles-tab" class="feed-section active">
@@ -254,6 +255,12 @@
             <div id="alerts-tab" class="feed-section">
                 <div id="alerts-list">
                     <div class="card alert"><strong>Caricamento avvisi…</strong><span>Ricezione Service Alerts ufficiali GTT.</span></div>
+                </div>
+            </div>
+
+            <div id="strikes-tab" class="feed-section">
+                <div id="strikes-list">
+                    <div class="card alert"><strong>Caricamento…</strong><span>Verifica scioperi ufficiali e notizie locali.</span></div>
                 </div>
             </div>
 
@@ -554,6 +561,9 @@
                 html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + capTxt + '</div>';
             }
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + '</div>';
+            html += '<div class="popup-row">' + (v.verifica === 'doppia_fonte'
+                ? 'Presenza confermata da GPS e orari di corsa (doppia fonte)'
+                : 'Tracciato dal solo GPS (corsa non nel feed orari)') + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
             if (v.next_stop) {
                 const eta = etaMinutes(v.next_stop);
@@ -703,6 +713,7 @@
             renderLinesPanel();
             renderFleetList();
             renderDelaysList(tripUpdates, meta);
+            renderStrikesList(data.scioperi || { ufficiali: [], notizie: [] });
 
             /* --- Avvisi: deviazioni in testa, spiegazione chiara --- */
             const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
@@ -837,6 +848,48 @@
                 </div>`;
             }).join('') :
                 '<div class="card d-ok"><strong>Nessun ritardo segnalato</strong><span>Le corse monitorate rispettano gli orari ufficiali GTT.</span></div>';
+        }
+
+        function renderStrikesList(scioperi) {
+            const el = document.getElementById('strikes-list');
+            const ufficiali = scioperi.ufficiali || [];
+            const notizie = (scioperi.notizie || []).slice(0, 15);
+            let html = '';
+
+            html += '<div class="line-group-title">Scioperi ufficiali GTT</div>';
+            if (ufficiali.length) {
+                ufficiali.forEach(al => {
+                    const routesArr = (al.affected_routes || []).slice(0, 8);
+                    html += `<div class="card alert"><strong>${esc(al.header)}</strong>`;
+                    html += routesArr.length
+                        ? '<div class="alert-lines">' + routesArr.map(lineBadge).join(' ') + '</div>'
+                        : '<div class="alert-lines"><span style="color:var(--text-3);font-size:0.75rem;">Tutta la rete</span></div>';
+                    if (al.start_time) html += '<div class="alert-meta">Inizio: ' + new Date(Number(al.start_time) * 1000).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</div>';
+                    html += '</div>';
+                });
+            } else {
+                html += '<div class="card d-ok"><strong>Nessuno sciopero ufficiale in corso</strong><span>Nessun avviso con causa sciopero pubblicato da GTT in questo momento.</span></div>';
+            }
+
+            html += '<div class="line-group-title">Notizie locali su mobilità ed eventi</div>';
+            if (notizie.length) {
+                notizie.forEach(n => {
+                    html += `<div class="card alert"><strong>${esc(n.titolo)}</strong>`;
+                    html += '<div class="alert-meta" style="margin-top:2px;">' + esc((n.data || '').slice(0, 16));
+                    if (n.linee_gtt_attive && n.linee_gtt_attive.length) {
+                        html += ' · linee GTT interessate: ' + n.linee_gtt_attive.map(esc).join(', ');
+                    }
+                    html += '</div>';
+                    if (n.parole_chiave && n.parole_chiave.length) {
+                        html += '<div class="alert-meta">' + n.parole_chiave.map(k => '<span class="badge info">' + esc(k) + '</span>').join(' ') + '</div>';
+                    }
+                    if (n.link) html += '<div class="alert-meta"><a href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-weight:600;">Leggi la notizia completa</a></div>';
+                    html += '</div>';
+                });
+            } else {
+                html += '<div class="card"><strong>Nessuna notizia di mobilità rilevante</strong><span>Nessuna notizia su scioperi, eventi o traffico pubblicata dalle fonti locali negli ultimi giorni.</span></div>';
+            }
+            el.innerHTML = html;
         }
 
         /* ---------- Event delegation: nessun onclick interpolato (XSS-proof) ---------- */

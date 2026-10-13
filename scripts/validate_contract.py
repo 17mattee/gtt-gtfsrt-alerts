@@ -136,7 +136,14 @@ async def validate_ws(base_ws, max_vehicles=50_000):
         alerts = data.get("alerts", [])
         meta = data.get("meta", {})
 
-        check("payload: chiavi dinamiche presenti", all(k in data for k in ("vehicles", "trip_updates", "meta")))
+        check("payload: chiavi dinamiche presenti", all(k in data for k in ("vehicles", "trip_updates", "scioperi", "meta")))
+        sc = data.get("scioperi") or {}
+        sc_ok = isinstance(sc.get("ufficiali"), list) and isinstance(sc.get("notizie"), list)
+        if sc_ok:
+            for n in (sc.get("notizie") or [])[:50]:
+                if not isinstance(n.get("titolo"), str) or not n.get("titolo"):
+                    sc_ok = False; break
+        check("sezione scioperi: forma completa (ufficiali + notizie)", sc_ok)
         check("primo messaggio: parte statica inclusa", static is not None and "routes_catalog" in static)
 
         n_err, examples = 0, []

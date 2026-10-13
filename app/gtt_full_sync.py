@@ -412,6 +412,12 @@ async def _fetch_all_gtt_data_inner() -> dict:
         if tu.get("vehicle_id"):
             updates_by_vehicle[tu["vehicle_id"]].append(tu)
     delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
+    # VERIFICA DOPPIA FONTE: un mezzo mostrato esiste perche' ha un fix GPS REALE
+    # fresco (filtro polit 'niente datato'). La conferma incrociata col feed
+    # corse (stesso vehicle_id o stessa corsa) attesta che e' davvero IN SERVIZIO
+    # su una corsa tracciata dagli orari: verificato da due fonti indipendenti GTT.
+    vehicles_in_tu = {t.get("vehicle_id") for t in trip_updates if t.get("vehicle_id")}
+    trips_in_tu = {t.get("trip_id") for t in trip_updates if t.get("trip_id")}
     stops_catalog = gtfs_manager.get_stops()
     headsigns = gtfs_manager.get_trip_headsigns()
     trip_routes = gtfs_manager.get_trip_routes()
@@ -477,9 +483,19 @@ async def _fetch_all_gtt_data_inner() -> dict:
     if derived_count:
         # delay_by_trip cattura i valori: si ricostruisce dopo la derivazione.
         delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
-        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senza campo delay nel feed).")
+        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senzo campo delay nel feed).")
+
+    # VERIFICA DOPPIA FONTE: un mezzo mostrato esiste perche' ha un fix GPS REALE
+    # fresco (filtro 'niente datato'). La conferma incrociata col feed corse
+    # (stesso vehicle_id o stessa corsa) attesta che e' davvero IN SERVIZIO su
+    # una corsa tracciata dagli orari: verificato da due fonti indipendenti GTT.
+    vehicles_in_tu = {t.get("vehicle_id") for t in trip_updates if t.get("vehicle_id")}
+    trips_in_tu = {t.get("trip_id") for t in trip_updates if t.get("trip_id")}
 
     for v in vehicles:
+        v["verifica"] = ("doppia_fonte"
+                         if v.get("vehicle_id") in vehicles_in_tu or v.get("trip_id") in trips_in_tu
+                         else "gps")
         candidates = updates_by_vehicle.get(v.get("vehicle_id")) or []
         chosen = None
         for tu in candidates:
@@ -675,6 +691,32 @@ async def _fetch_all_gtt_data_inner() -> dict:
     for tu in trip_updates:
         if tu.get("trip_id") and not tu.get("headsign"):
             tu["headsign"] = headsigns_all.get(tu["trip_id"])
+
+    # SCIOPERI & EVENTI: doppia fonte con interscambio.
+    # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)
+    # - NOTIZIE: fonte locale RSS filtrata su mobilita' (30 min di cache)
+    # - INTERSCAMBIO: le linee citate nella notizia che hanno avvisi GTT attivi
+    #   vengono collegate (badge), cosi' l'operatore vede subito la correlazione
+    from app.news_monitor import get_transport_news
+    from app.gtfs_rt import _extract_routes_from_text
+    try:
+        notizie = await asyncio.to_thread(get_transport_news)
+    except Exception as exc:
+        logger.warning("Notizie locali non disponibili (%s).", exc)
+        notizie = []
+    alert_routes_attive = set()
+    for a in alerts:
+        alert_routes_attive.update(a.get("affected_routes") or [])
+    for n in notizie:
+        try:
+            citate = _extract_routes_from_text(n.get("titolo", "") + " " + n.get("descrizione", ""))
+            n["linee_gtt_attive"] = [l for l in citate if l in alert_routes_attive]
+        except Exception:
+            n["linee_gtt_attive"] = []
+    result["scioperi"] = {
+        "ufficiali": [a for a in alerts if a.get("cause") == 4],
+        "notizie": notizie,
+    }
 
     # Tipi e colori UFFICIALI delle linee (dal GTFS-Static): la UI non deve
     # indovinare quale linea sia tram o bus, usa il dato reale.
