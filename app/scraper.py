@@ -1,8 +1,9 @@
 import os
+import hashlib
 import requests
 from bs4 import BeautifulSoup
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import time
 import logging
 from google.transit import gtfs_realtime_pb2
@@ -43,12 +44,35 @@ def parse_effect(text: str):
         return gtfs_realtime_pb2.Alert.Effect.SIGNIFICANT_DELAYS
     return gtfs_realtime_pb2.Alert.Effect.UNKNOWN_EFFECT
 
+def _rome_offset_seconds(dt: datetime) -> int:
+    """Fuso Europe/Rome (CET +1, DST +2) per un datetime NAIVE locale italiano.
+
+    Stesso criterio di app/gtt_full_sync._rome_offset_seconds, ma su orologio
+    locale: le date nel portale GTT sono ora italiana, non del server.
+    """
+    year = dt.year
+
+    def last_sunday(month: int, hour: int) -> datetime:
+        d = datetime(year, month, 31, hour)
+        while d.weekday() != 6:  # domenica
+            d -= timedelta(days=1)
+        return d
+
+    dst_start = last_sunday(3, 2)   # ultima domenica di marzo, 02:00 locale
+    dst_end = last_sunday(10, 3)    # ultima domenica di ottobre, 03:00 locale
+    return 7200 if dst_start <= dt < dst_end else 3600
+
+
 def extract_start_time(text: str):
     match = re.search(r"(\d{2}/\d{2}/\d{4})\s(\d{2}:\d{2})", text)
     if match:
         try:
             dt = datetime.strptime(match.group(0), "%d/%m/%Y %H:%M")
-            return int(dt.timestamp())
+            # L'orario del portale GTT e' ora locale italiana: si converte in
+            # epoch con l'offset Europe/Rome, non con il fuso del server
+            # (su Render e' UTC: senza di cio' ogni avviso risulterebbe
+            # spostato di 1-2 ore).
+            return int(dt.replace(tzinfo=timezone(timedelta(seconds=_rome_offset_seconds(dt)))).timestamp())
         except:
             pass
     return int(time.time())
@@ -107,9 +131,13 @@ def fetch_gtt_alerts():
         for idx, text in enumerate(unique_texts):
             route_ids = extract_route_ids(text)
             title_match = text.split(".")[0] if "." in text else text[:60]
-            
+
+            # ID STABILE dall'avviso stesso: senza di cio' ogni sync genererebbe
+            # un id nuovo (contenuto identico) e lo storico Supabase si
+            # riempirebbe di duplicati invece di fare upsert.
+            digest = hashlib.md5((title_match.strip()[:80] + "|" + text.strip()[:160]).encode("utf-8")).hexdigest()[:12]
             alerts.append({
-                "id": f"gtt_alert_pro_{idx + 1}_{int(time.time())}",
+                "id": f"gtt_alert_pro_{digest}",
                 "title": title_match.strip(),
                 "description": text.strip(),
                 "route_ids": route_ids,

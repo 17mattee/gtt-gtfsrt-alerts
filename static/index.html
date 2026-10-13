@@ -90,7 +90,7 @@
         .detour-dir { margin-top: 7px; }
         .detour-dir .dir-name { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #7c3aed; margin-bottom: 3px; }
         .street-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
-        .street-chip { background: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 0.72rem; color: var(--text); font-weight: 500; }
+        .street-chip { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 0.72rem; color: var(--text); font-weight: 500; }
         .street-chip.start { background: #f5f0ff; border-color: #d8c7f5; color: #5b21b6; font-weight: 600; }
         .street-chip.back { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
         .street-arrow { color: var(--text-3); font-size: 0.7rem; }
@@ -307,7 +307,7 @@
             const types = (lastData && lastData.route_types) || {};
             if (r in types) return types[r];
             if (/^m/i.test(r)) return 1;
-            if (['3', '4', '7', '9', '10', '13', '15', '16'].includes(r) || /^star/i.test(r)) return 0;
+            if (['3', '4', '7', '9', '10', '13', '15', '16'].includes(r)) return 0; // STAR = bus (route_type 3 nel GTT)
             return 3;
         }
         const TYPE_LABEL = { 1: 'Metro', 0: 'Tram', 7: 'Funicolare', 3: 'Bus' };
@@ -567,7 +567,7 @@
                 if (!lat || !lon) continue;
                 bounds.push([lat, lon]);
 
-                const delay = v.delay_seconds ?? 0;
+                const delay = v.delay_seconds;
                 const color = delayColor(delay);
                 const bearing = Number(v.bearing || 0);
                 const arrow = bearing
@@ -612,9 +612,9 @@
                 let line = `<div class="card ${isDetour ? 'detour' : 'alert'}">`;
                 line += `<span class="alert-type ${badge[0]}">${badge[1]}</span>`;
                 if (isDetour) {
-                    line += `<strong style="color:#1a1a1a;">Percorso modificato</strong>`;
+                    line += `<strong style="color:var(--text);">Percorso modificato</strong>`;
                 } else {
-                    line += `<strong style="color:#1a1a1a;">${esc(al.header)}</strong>`;
+                    line += `<strong style="color:var(--text);">${esc(al.header)}</strong>`;
                 }
                 line += lineBadges;
                 // Deviazione ELABORATA dal testo GTT: periodo, itinerario via per via, motivo.
@@ -687,6 +687,7 @@
 
             let html = '', shown = 0;
             for (const key of routeKeys) {
+                if (shown >= 300) break;  // niente titoli di gruppo vuoti oltre il limite
                 const group = byRoute[key];
                 const longName = routesCatalog[key];
                 html += `<div class="line-group-title">${lineBadge(key)} <span>${esc(fmtVehicleType(key))} · ${group.length} ${group.length === 1 ? 'mezzo' : 'mezzi'}</span>${longName ? `<span class="route-name">${esc(longName)}</span>` : ''}</div>`;

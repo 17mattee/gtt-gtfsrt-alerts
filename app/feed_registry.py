@@ -21,6 +21,7 @@ REGISTRY_URL = (
     "master/feeds/gtt.to.it.dmfr.json"
 )
 REGISTRY_TTL_SECONDS = 6 * 3600  # il catalogo cambia raramente: 6 ore di cache
+REGISTRY_ERROR_TTL_SECONDS = 600  # fallito: si riprova tra 10 min, non a ogni ciclo
 
 _registry_cache: dict = {"urls": None, "fetched_at": 0.0}
 
@@ -69,13 +70,21 @@ def get_feed_urls() -> dict:
 
     Ritorna un dict con liste (anche vuote): il chiamante concatena sempre i
     propri URL di fallback dopo quelli scoperti.
+    NB: si mette in cache ANCHE il fallimento (TTL corto): altrimenti ogni
+    ciclo di sync (~3s) rifarebbe una chiamata HTTP sincrona da dentro
+    l'event loop, bloccandolo per l'intero timeout.
     """
     now = time.time()
-    if _registry_cache["urls"] is None or (now - _registry_cache["fetched_at"]) > REGISTRY_TTL_SECONDS:
+    if _registry_cache["urls"] is None:
+        # Mai riuscito (o ultimo tentativo fallito): retry lento, mai a ogni ciclo
+        stale = (now - _registry_cache["fetched_at"]) > REGISTRY_ERROR_TTL_SECONDS
+    else:
+        stale = (now - _registry_cache["fetched_at"]) > REGISTRY_TTL_SECONDS
+    if stale:
         discovered = _fetch_registry()
+        _registry_cache["urls"] = discovered or None
+        _registry_cache["fetched_at"] = now
         if discovered:
-            _registry_cache["urls"] = discovered
-            _registry_cache["fetched_at"] = now
             logger.info(
                 "🗂️ [REGISTRY] Feed GTT auto-scoperti dal catalogo open-data: veicoli=%s corse=%s avvisi=%s statico=%s",
                 len(discovered.get("vehicle_positions", [])),
@@ -83,4 +92,6 @@ def get_feed_urls() -> dict:
                 len(discovered.get("alerts", [])),
                 len(discovered.get("static", [])),
             )
+        else:
+            logger.warning("🗂️ [REGISTRY] Catalogo feed non disponibile: uso gli URL noti (riprovo tra %s min).", REGISTRY_ERROR_TTL_SECONDS // 60)
     return _registry_cache["urls"] or {"vehicle_positions": [], "trip_updates": [], "alerts": [], "static": []}

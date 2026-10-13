@@ -340,7 +340,10 @@ async def fetch_gtt_trip_updates() -> list:
                 "vehicle_id": tu.vehicle.id if tu.HasField("vehicle") else None,
                 "delay_seconds": delay,
                 "next_stop": next_stop,
-                "timestamp": tu.timestamp or int(time.time()),
+                # Nessun timestamp = corsa senza dato di aggiornamento: 0, mai
+                # un finto "adesso" che farebbe vincere questa entita' sulla
+                # corsa piu' recente nella scelta del ritardo del mezzo.
+                "timestamp": tu.timestamp or 0,
             })
         last_trip_updates_source = "live"
         print(f"🕐 [GTFS-RT] Trip Updates UFFICIALI GTT: {len(updates)} corse con stato di ritardo in tempo reale.")
@@ -414,6 +417,12 @@ async def fetch_gtt_rt_alerts() -> list:
         print(f"📢 [GTFS-RT] Service Alerts UFFICIALI GTT ricevuti: {len(alerts)} avvisi in tempo reale.")
     else:
         last_alerts_source = "unavailable"
+        # Fallimento transitorio: meglio gli avvisi di 20s fa (cache) che zero
+        # avvisi, che farebbero scattare il fallback e far "lampeggiare" la UI
+        # con l'avviso di default per poi tornare a quelli veri al ciclo dopo.
+        if _alerts_cache["data"]:
+            print(f"📢 [GTFS-RT] Feed Alerts non raggiungibile: riuso {len(_alerts_cache['data'])} avvisi dalla cache ({int(time.time() - _alerts_cache['fetched_at'])}s).")
+            return _alerts_cache["data"]
         print("⚠️ [GTFS-RT] Feed Alerts ufficiale non raggiungibile in questo ciclo.")
 
     return alerts
