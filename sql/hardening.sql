@@ -12,13 +12,16 @@ ALTER VIEW public.v_gtt_last_positions SET (security_invoker = true);
 -- 2) Indice duplicato: elimina il doppione (resta idx_gtt_positions_recorded_at)
 DROP INDEX IF EXISTS public.idx_vehicle_positions_time;
 
--- 3) Funzione rls_auto_enable(): helper one-shot che abilitava l'RLS sulle
---    tabelle, NON usato dal middleware (zero riferimenti nel codice: il punto
---    4 qui sotto abilita l'RLS esplicitamente). La si elimina alla radice:
---    cosi' spariscono i warning del Security Advisor
---    "Public/Signed-In Users Can Execute SECURITY DEFINER Function".
+-- 3) Funzione rls_auto_enable(): helper SECURITY DEFINER usato solo
+--    dall'event trigger 'ensure_rls' (auto-RLS sulle tabelle nuove),
+--    NON usato dal middleware (zero riferimenti nel codice: il punto 4 qui
+--    sotto abilita l'RLS esplicitamente). Si eliminano ENTRAMBI, in ordine:
+--    prima l'event trigger, poi la funzione da cui dipende, cosi' spariscono
+--    i warning del Security Advisor "Public/Signed-In Users Can Execute
+--    SECURITY DEFINER Function".
 --    NB: in PostgreSQL il role PUBLIC ha EXECUTE di default su ogni funzione,
 --    quindi la sola REVOKE da anon/authenticated non basta mai.
+DROP EVENT TRIGGER IF EXISTS ensure_rls;
 DROP FUNCTION IF EXISTS public.rls_auto_enable();
 
 -- (Solo se vuoi mantenere la funzione invece di eliminarla: revoca l'esecuzione
