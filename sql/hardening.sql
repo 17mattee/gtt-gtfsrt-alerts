@@ -12,11 +12,18 @@ ALTER VIEW public.v_gtt_last_positions SET (security_invoker = true);
 -- 2) Indice duplicato: elimina il doppione (resta idx_gtt_positions_recorded_at)
 DROP INDEX IF EXISTS public.idx_vehicle_positions_time;
 
--- 3) Funzione pubblica: revoca l'esecuzione ad anon e authenticated.
---    Se questa singola istruzione desse "function does not exist", significa
---    che la funzione e' gia' stata rimossa: ignora l'errore e rilancia lo
---    script, oppure cancella questa istruzione.
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated;
+-- 3) Funzione rls_auto_enable(): helper one-shot che abilitava l'RLS sulle
+--    tabelle, NON usato dal middleware (zero riferimenti nel codice: il punto
+--    4 qui sotto abilita l'RLS esplicitamente). La si elimina alla radice:
+--    cosi' spariscono i warning del Security Advisor
+--    "Public/Signed-In Users Can Execute SECURITY DEFINER Function".
+--    NB: in PostgreSQL il role PUBLIC ha EXECUTE di default su ogni funzione,
+--    quindi la sola REVOKE da anon/authenticated non basta mai.
+DROP FUNCTION IF EXISTS public.rls_auto_enable();
+
+-- (Solo se vuoi mantenere la funzione invece di eliminarla: revoca l'esecuzione
+--  anche al role PUBLIC, altrimenti il warning "public can execute" resta.)
+-- REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM PUBLIC, anon, authenticated;
 
 -- 4) Row Level Security su tutte le tabelle: il middleware scrive con la
 --    service_role key che BYPASSA RLS, quindi le sue scritture continuano;
