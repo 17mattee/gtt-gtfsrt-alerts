@@ -871,7 +871,7 @@
                 html += '<div class="card d-ok"><strong>Nessuno sciopero ufficiale in corso</strong><span>Nessun avviso con causa sciopero pubblicato da GTT in questo momento.</span></div>';
             }
 
-            html += '<div class="line-group-title">Notizie locali su mobilità ed eventi</div>';
+            html += '<div class="line-group-title">Notizie locali su scioperi e mezzi pubblici</div>';
             if (notizie.length) {
                 notizie.forEach(n => {
                     html += `<div class="card alert"><strong>${esc(n.titolo)}</strong>`;
@@ -880,14 +880,11 @@
                         html += ' · linee GTT interessate: ' + n.linee_gtt_attive.map(esc).join(', ');
                     }
                     html += '</div>';
-                    if (n.parole_chiave && n.parole_chiave.length) {
-                        html += '<div class="alert-meta">' + n.parole_chiave.map(k => '<span class="badge info">' + esc(k) + '</span>').join(' ') + '</div>';
-                    }
                     if (n.link) html += '<div class="alert-meta"><a href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-weight:600;">Leggi la notizia completa</a></div>';
                     html += '</div>';
                 });
             } else {
-                html += '<div class="card"><strong>Nessuna notizia di mobilità rilevante</strong><span>Nessuna notizia su scioperi, eventi o traffico pubblicata dalle fonti locali negli ultimi giorni.</span></div>';
+                html += '<div class="card"><strong>Nessuna notizia recente su scioperi o mezzi pubblici</strong><span>Le fonti locali non hanno pubblicato nulla di rilevante negli ultimi 3 giorni.</span></div>';
             }
             el.innerHTML = html;
         }

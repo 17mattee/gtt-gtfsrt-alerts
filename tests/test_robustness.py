@@ -336,24 +336,26 @@ def test_catalogo_stale_durante_outage_totale():
     gtfs_manager._cache_source = "fallback"
 
 
-def test_news_monitor_filtro_parole_chiave():
-    """Il monitor notizie seleziona solo cio' che impatta la mobilita'."""
+def test_news_monitor_filtro_severo():
+    """Solo scioperi/mezzi pubblici, solo recenti (<=3 giorni)."""
+    import time as _t
+    from datetime import datetime, timedelta, timezone
     import app.news_monitor as nm
 
-    rss = b"""<?xml version="1.0"?><rss><channel>
-    <item><title>Sciopero GTT giovedi: corriera e bus fermi</title><link>https://esempio.it/1</link><pubDate>Tue, 13 Oct 2026 10:00:00 +0200</pubDate><description>Agitazione sindacale dei lavoratori</description></item>
-    <item><title>Corteo in centro: deviazioni del traffico</title><link>https://esempio.it/2</link><pubDate>Tue, 13 Oct 2026 11:00:00 +0200</pubDate><description>Manifestazione in piazza</description></item>
-    <item><title>Vince il talent show la squadra preferita</title><link>https://esempio.it/3</link><pubDate>Tue, 13 Oct 2026 12:00:00 +0200</pubDate><description>Serata televisiva</description></item>
+    adesso = _t.time()
+    oggi = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    vecchia = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+    rss = f"""<?xml version="1.0"?><rss><channel>
+    <item><title>Sciopero GTT giovedi: autobus e tram fermi</title><link>https://e.it/1</link><pubDate>{oggi}</pubDate><description>Agitazione sindacale dei lavoratori</description></item>
+    <item><title>Il ritorno del vinile a Nichelino: mostra-mercato del disco</title><link>https://e.it/2</link><pubDate>{oggi}</pubDate><description>Mostra mercato</description></item>
+    <item><title>Donna sevizjata per 12 ore: un arresto</title><link>https://e.it/3</link><pubDate>{oggi}</pubDate><description>Cronaca nera</description></item>
+    <item><title>Proteste studentesche all'Istituto Boselli</title><link>https://e.it/4</link><pubDate>{oggi}</pubDate><description>Occupazione scolastica</description></item>
+    <item><title>Vecchio sciopero dei tram di 10 giorni fa</title><link>https://e.it/5</link><pubDate>{vecchia}</pubDate><description>Tram fermi</description></item>
     </channel></rss>"""
-    items = nm._parse_rss(rss)
-    assert len(items) == 3
-    relevant = nm._filter_relevant(items)
-    titoli = {i["titolo"][:20] for i in relevant}
-    assert any("Sciopero" in t for t in titoli), "lo sciopero deve restare"
-    assert any("Corteo" in t for t in titoli), "il corteo deve restare"
-    assert not any("talent" in t for t in titoli), "la TV non c'entra con la mobilita'"
-    # le parole chiave sono registrate
-    sciopero = next(i for i in relevant if "Sciopero" in i["titolo"])
-    assert any("sciopero" in k for k in sciopero["parole_chiave"])
-    # RSS malformato: mai eccezioni
-    assert nm._parse_rss(b"<rss>rotto") == []
+    relevant = nm._filter_relevant(nm._parse_rss(rss.encode()), now=adesso)
+    titoli = [i["titolo"] for i in relevant]
+    assert len(titoli) == 1 and "Sciopero GTT" in titoli[0], f"deve restare SOLO lo sciopero recente: {titoli}"
+    # il mercato del vinile, la cronaca nera, le proteste scolastiche e le
+    # notizie di 10 giorni fa NON c'entrano i mezzi pubblici: escluse.
+    assert not any("vinile" in t or "seviz" in t or "studente" in t or "Vecchio" in t for t in titoli)

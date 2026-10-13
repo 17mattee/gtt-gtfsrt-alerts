@@ -26,15 +26,22 @@ NEWS_CACHE_TTL = 1800        # 30 minuti: le notizie non cambiano ogni ciclo
 NEWS_FAIL_TTL = 300         # RSS giu': si riprova dopo 5 minuti, non ogni ciclo
 NEWS_MAX_ITEMS = 20
 
-# Parole chiave che impattano la mobilita' urbana di Torino.
+# SOLO notizie su scioperi e mezzi pubblici (richiesta esplicita): la notizia
+# deve parlare di trasporto pubblico. Termini generici come 'mercato', 'chiuso',
+# 'partita', 'concerto', 'incidente' NON bastano: catturavano cronaca che non
+# c'entra nulla con i mezzi GTT.
 KEYWORDS = re.compile(
-    r"\b(scioper\w*|agitazion\w*|sindacat\w*|manifestazion\w*|corteo|presidi\w*|"
-    r"blocc\w+|deviazion\w*|chius\w*|incident\w*|guast\w*|"
-    r"gtt|autobus|bus|tram|metropolitana|metro|fermata|ferrov\w*|stazion\w*|"
-    r"traffico|strad\w*|"
-    r"partita|stadio|concerto|maratona|mercato|gran premio|sagra|fiera)\b",
+    r"(scioper\w*|agitazion\w*\s+sindacal|sindacat\w*|"
+    r"\bgtt\b|autobus|autocorriera\w*|autolinee|\btram\b|metropolitana|mezzi pubblici|"
+    r"trasporti pubblici|trasporto pubblico|"
+    r"fermata|corse\w*\s+(sospes|soppres|deviat|limitat)|"
+    r"servizio\w*\s+(sospes|soppres|deviat|limitat)|"
+    r"linee?\s+(sospes\w*|soppres\w*|deviat\w*)|"
+    r"corteo|manifestazion\w*\s+(per\s+)?(il\s+)?(blocco|deviazion))",
     re.IGNORECASE,
 )
+# Solo notizie RECENTI: oltre MAX_AGE_DAYS giorni vengono scartate.
+MAX_AGE_DAYS = 3
 
 _news_cache = {"data": None, "fetched_at": 0.0}
 _news_fail_at = 0.0
@@ -60,14 +67,32 @@ def _parse_rss(xml_bytes) -> list:
     return items
 
 
-def _filter_relevant(items: list, max_items: int = NEWS_MAX_ITEMS) -> list:
-    """Solo le notizie che impattano la mobilita', con le parole chiave trovate."""
+def _item_age_days(data_pubblicazione: str, now: float) -> float | None:
+    """Eta' in giorni della notizia, o None se la data non e' leggibile."""
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+    try:
+        dt = parsedate_to_datetime(data_pubblicazione)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (now - dt.timestamp()) / 86400
+    except (TypeError, ValueError):
+        return None
+
+
+def _filter_relevant(items: list, max_items: int = NEWS_MAX_ITEMS, now: float = None) -> list:
+    """Solo notizie RECENTI (<= MAX_AGE_DAYS) su scioperi e mezzi pubblici."""
+    import time as _t
+    now = _t.time() if now is None else now
     out = []
     for it in items:
         text = f"{it['titolo']} {it['descrizione']}"
-        keywords = sorted({m.group(0).lower() for m in KEYWORDS.finditer(text)})
-        if keywords:
-            out.append({**it, "parole_chiave": keywords[:6]})
+        if not KEYWORDS.search(text):
+            continue
+        eta = _item_age_days(it.get("data") or "", now)
+        if eta is None or eta > MAX_AGE_DAYS:
+            continue  # data illeggibile o troppo vecchia: scartata
+        out.append({**it, "eta_giorni": round(eta, 1)})
     return out[:max_items]
 
 
