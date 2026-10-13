@@ -57,18 +57,26 @@ def http_get(url, timeout=20):
 
 def validate_http(base):
     print("\n[1] /health")
-    status, headers, body = http_get(f"{base}/health")
-    ok = status == 200
-    detail = ""
-    health = {}
-    if ok:
-        try:
-            health = json.loads(body)
-            ok = (health.get("status") == "healthy" and health.get("agency") == "GTT"
-                  and all(k in health for k in ("vehicles", "routes", "trip_updates", "last_update"))
-                  and isinstance(health.get("last_update"), int))
-        except Exception as e:
-            ok, detail = False, f"JSON non valido: {e}"
+    # Cold start: il primo sync (catalogo GTFS ~12MB + feed) impiega alcuni
+    # secondi; last_update arriva null finche' non completa — si riprova.
+    ok, detail, health = False, "nessuna risposta", {}
+    for attempt in range(7):  # fino a ~30s
+        status, _, body = http_get(f"{base}/health")
+        if status == 200:
+            try:
+                health = json.loads(body)
+                lu = health.get("last_update")
+                ok = (health.get("status") == "healthy" and health.get("agency") == "GTT"
+                      and all(k in health for k in ("vehicles", "routes", "trip_updates", "last_update")))
+                if ok and not isinstance(lu, int):
+                    ok, detail = False, "last_update non int (cold start?)"
+                if ok or attempt == 6:
+                    break
+            except Exception as e:
+                ok, detail = False, f"JSON non valido: {e}"
+        else:
+            detail = f"HTTP {status}"
+        time.sleep(5)
     check("health: campi e tipi corretti", ok, detail)
 
     print("\n[2] Dashboard, SRI e manifest")
