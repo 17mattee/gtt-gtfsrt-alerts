@@ -154,3 +154,50 @@ def test_previsione_fermata_appena_passata_mostrata_come_zero():
     predicted, stop_id = prediction
     assert stop_id == "S_142930"
     assert predicted == now - 30
+
+
+def test_delay_derivato_corsa_solo_orari():
+    """Corse GTT 'solo-orari': delay = previsione - orario programmato."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    # 2026-10-13 12:00 UTC = 14:00 Roma (CEST)
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    sched_1410 = 51000  # 14:10 locali
+    seq = [(50400, "S_1400"), (sched_1410, "S_1410"), (51600, "S_1430")]
+
+    # previsione d'arrivo alle 14:11:30 Roma (base+690s) -> 90s di ritardo reale
+    assert _derive_delay_from_arrival(seq, base_utc + 690) == 90
+
+    # anticipo: arrivo previsto alle 14:08 -> 2 min prima delle 14:10
+    assert _derive_delay_from_arrival(seq, base_utc + 480) == -120
+
+    # puntuale: 10s dopo le 14:10
+    assert _derive_delay_from_arrival(seq, base_utc + 610) == 10
+
+
+def test_delay_derivato_oltre_tolleranza_none():
+    """Nessuna fermata programmata entro la tolleranza: None, mai un numero a caso."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    seq = [(50400, "S_1400"), (51000, "S_1410")]
+    # arrivo previsto lontano da ogni orario programmato (>300s)
+    assert _derive_delay_from_arrival(seq, base_utc + 3600) is None
+    assert _derive_delay_from_arrival([], base_utc) is None
+    assert _derive_delay_from_arrival(seq, 0) is None
+
+
+def test_delay_derivato_corsa_dopo_mezzanotte():
+    """Corse notturne 'solo-orari': la derivazione prova anche la mezzanotte di ieri."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    # 2026-10-14 00:30 Roma = 2026-10-13 22:30 UTC
+    now_utc = datetime(2026, 10, 13, 22, 30, tzinfo=timezone.utc).timestamp()
+    seq = [(86100, "S_2355"), (88800, "S_2440")]  # 23:55 e 24:40 di ieri
+    # previsione: oggi 00:42 Roma (22:42 UTC) = 2 min dopo le 24:40 di ieri
+    arr = datetime(2026, 10, 13, 22, 42, tzinfo=timezone.utc).timestamp()
+    derived = _derive_delay_from_arrival(seq, arr)
+    assert derived == 120, f"atteso 120s di ritardo, derivato {derived}"
