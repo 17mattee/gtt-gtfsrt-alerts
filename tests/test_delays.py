@@ -201,3 +201,21 @@ def test_delay_derivato_corsa_dopo_mezzanotte():
     arr = datetime(2026, 10, 13, 22, 42, tzinfo=timezone.utc).timestamp()
     derived = _derive_delay_from_arrival(seq, arr)
     assert derived == 120, f"atteso 120s di ritardo, derivato {derived}"
+
+
+def test_prev_stop_name():
+    """'Tra la fermata X e Y': la fermata precedente in sequenza alla prossima."""
+    from app.gtt_full_sync import _prev_stop_name
+
+    seq = [(50400, "S_1400"), (51000, "S_1410"), (51600, "S_1430")]
+    stops = {
+        "S_1400": {"name": "Fermata 101 - PORTA NUOVA"},
+        "S_1410": {"name": "Fermata 102 - VIA ROMA"},
+        "S_1430": {"name": "Fermata 103 - CASTELLO"},
+    }
+    assert _prev_stop_name(seq, "S_1430", stops) == "VIA ROMA"
+    assert _prev_stop_name(seq, "S_1410", stops) == "PORTA NUOVA"
+    # prima fermata della corsa: nessuna precedente
+    assert _prev_stop_name(seq, "S_1400", stops) is None
+    # stop_id non in sequenza: nessuna stima a caso
+    assert _prev_stop_name(seq, "S_9999", stops) is None

@@ -117,6 +117,24 @@ def _match_next_stop(sequence, rt_arrival_ts, delay_seconds, tolerance=300):
     return best_stop if best_dist is not None and best_dist <= tolerance else None
 
 
+def _prev_stop_name(sequence, stop_id, stops_catalog):
+    """Nome della fermata PRECEDENTE a stop_id lungo la corsa (o None).
+
+    Serve per il 'tra la fermata X e Y': con la corsa e la fermata in arrivo
+    note, la precedente in sequenza e' l'ultima appena servita. Solo dati
+    GTFS-Static, nessuna stima sul GPS.
+    """
+    for i, (_sched, sid) in enumerate(sequence):
+        if sid == stop_id:
+            if i == 0:
+                return None  # il mezzo e' alla prima fermata della corsa
+            prev = stops_catalog.get(sequence[i - 1][1]) or {}
+            name = prev.get("name") or sequence[i - 1][1]
+            m = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", name)
+            return (m.group(1).strip() if m else name).strip()
+    return None
+
+
 def _predict_next_stop(sequence, delay_seconds, now=None):
     """Prossima fermata prevista di una corsa: (epoch_arrivo, stop_id) o None.
 
@@ -459,6 +477,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
                             "minutes": max(0, minutes),
                             "incoerente": incoh,
                             "calcolata": True,
+                            "prev_stop": _prev_stop_name(seq, stop_id, stops_catalog),
                         }
                 # Si passa alla corsa successiva solo se questa non ha prodotto
                 # una previsione (es. cambio corsa: la chosen e' gia' terminata).
@@ -485,6 +504,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
             # NB: si usa il trip_id del TRIP UPDATE scelto (quello del veicolo
             # nel feed posizioni puo' essere vuoto o sfasato durante il cambio corsa).
             chosen_trip = (chosen or {}).get("trip_id")
+            resolved_stop = next_stop.get("stop_id")
             if not stop and chosen_trip and chosen_trip in trip_sequences:
                 matched = _match_next_stop(
                     trip_sequences[chosen_trip],
@@ -492,9 +512,16 @@ async def _fetch_all_gtt_data_inner() -> dict:
                     chosen.get("delay_seconds", 0) if chosen else 0,
                 )
                 if matched:
+                    resolved_stop = matched
                     stop = stops_catalog.get(matched) or {}
                     if stop.get("name"):
                         entry["name"] = stop["name"]
+            # 'Tra la fermata X e Y': la fermata PRECEDENTE in sequenza e'
+            # l'ultima appena servita (solo GTFS-Static, nessuna stima GPS).
+            if resolved_stop and chosen_trip and chosen_trip in trip_sequences:
+                prev_name = _prev_stop_name(trip_sequences[chosen_trip], resolved_stop, stops_catalog)
+                if prev_name:
+                    entry["prev_stop"] = prev_name
             if stop.get("lat") and stop.get("lon") and remaining > 0:
                 dist = _haversine_meters(v.get("latitude", 0), v.get("longitude", 0), stop["lat"], stop["lon"])
                 # Velocita' richiesta oltre ~108 km/h con distanza significativa

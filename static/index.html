@@ -515,6 +515,9 @@
             if (v.next_stop) {
                 const eta = etaMinutes(v.next_stop);
                 html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + (eta != null ? (eta > 0 ? ' · tra ' + eta + ' min' : ' · in arrivo') : '') + '</div>';
+                if (v.next_stop.prev_stop) {
+                    html += '<div class="popup-row">Ultima servita: ' + esc(v.next_stop.prev_stop) + '</div>';
+                }
                 if (v.next_stop.incoerente) {
                     html += '<div class="popup-row" style="color:#b96b00;">⚠ Previsione GTT non coerente con la posizione GPS attuale</div>';
                 }
