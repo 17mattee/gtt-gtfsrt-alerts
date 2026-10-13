@@ -136,7 +136,8 @@ def _predict_next_stop(sequence, delay_seconds, now=None):
     best = None
     for sched, stop_id in sequence:
         for day_base in (base - 86400, base):
-            predicted = day_base + sched + delay_seconds
+            # epoch INT (il percorso real-time pubblica int: tipo coerente)
+            predicted = int(day_base + sched + delay_seconds)
             if predicted >= now - 60 and (best is None or predicted < best[0]):
                 best = (predicted, stop_id)
     return best
