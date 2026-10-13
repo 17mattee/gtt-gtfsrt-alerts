@@ -433,9 +433,13 @@
         }
 
         /* ---------- Formattazione: testo e colore sempre coerenti ---------- */
-        // Soglie (verificate sul feed GTT reale): |delay| <= 2 min = in orario,
-        // oltre 2 min in anticipo = blu (il mezzo parte in anticipo, rischio di
-        // perderlo), 2-5 min di ritardo = arancione, oltre 5 min = rosso.
+        // Soglie (verificate sul feed GTT reale): |delay| < 2 min = in orario,
+        // ALMENO 2 min in anticipo = blu (il mezzo parte in anticipo, rischio
+        // di perderlo), ALMENO 2 min di ritardo = arancione (fino a 5),
+        // oltre 5 min = rosso. Il confine a 120s e' INCLUSIVO su entrambi i
+        // lati: 120s precisi = "2 min di ritardo/anticipo" marcati, coerenti
+        // col testo (sotto i 2 min la tolleranza resta verde: e' anche lo
+        // standard dei gestori, evita rumore da GPS).
         // delay null = feed ritardi GTT non disponibile: MAI mostrato come orario.
         function fmtDelay(seconds) {
             if (seconds == null) return 'ritardo n/d';
@@ -447,14 +451,14 @@
         function delayClass(seconds) {
             if (seconds == null) return '';
             if (seconds <= -120) return 'd-early';
-            if (seconds <= 120) return 'd-ok';
+            if (seconds < 120) return 'd-ok';
             if (seconds <= 300) return 'd-warn';
             return 'd-late';
         }
         function delayColor(seconds) {
             if (seconds == null) return '#6f6f6a';
             if (seconds <= -120) return '#2563eb';
-            if (seconds <= 120) return '#1a8a4a';
+            if (seconds < 120) return '#1a8a4a';
             if (seconds <= 300) return '#d97706';
             return '#dc2626';
         }
@@ -535,7 +539,7 @@
             const meta = data.meta || {};
 
             const detours = alerts.filter(al => al.category === 'deviazione').length;
-            const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds > 120).length;
+            const delayedTrips = tripUpdates.filter(tu => tu.delay_seconds != null && tu.delay_seconds >= 120).length;
             const live = meta.vehicles_source === 'live';
             const unavailable = meta.vehicles_source === 'unavailable';
             const degraded = meta.positions_degraded;
