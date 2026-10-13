@@ -261,9 +261,25 @@ def _fallback_payload() -> dict:
         }
 
 
+# Tetto alle connessioni WebSocket simultanee: sul piano free (RAM e banda
+# limitate) un crawler o un client impazzito con centinaia di tab aperte
+# satura memoria e banda e degrada il servizio per tutti. Oltre il limite
+# la connessione viene rifiutata con close code 1013 (Try Again Later):
+# il client la riapre da solo col backoff esistente.
+MAX_WS_CLIENTS = 40
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    if len(manager.active_connections) > MAX_WS_CLIENTS:
+        logger.warning("WS: limite di %d client raggiunto, connessione rifiutata (protezione flood).", MAX_WS_CLIENTS)
+        manager.disconnect(websocket)
+        try:
+            await websocket.close(code=1013, reason="Limite client raggiunto, riconnessione automatica tra poco")
+        except Exception:
+            pass
+        return
     print(f"🔌 [WS] Control Room collegata. Client totali: {len(manager.active_connections)}")
 
     static_signature = ""
