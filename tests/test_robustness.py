@@ -213,3 +213,24 @@ def test_client_ip_dietro_proxy():
     assert _client_ip(Request(scope)) == "203.0.113.9"
     scope_senza_xff = {"type": "http", "headers": [], "client": ("10.20.30.40", 50000)}
     assert _client_ip(Request(scope_senza_xff)) == "10.20.30.40"
+
+
+def test_raw_alerts_negative_cache_durante_outage(monkeypatch):
+    """Outage recente del feed alerts: il proxy non tocca nemmeno la rete."""
+    import asyncio
+    gtfs_rt._raw_alerts_cache.update({"data": b"", "fetched_at": 0.0})
+    gtfs_rt._raw_alerts_fail_at = gtfs_rt.time.time()  # outage appena avvenuto
+
+    def no_urls():
+        raise AssertionError("durante l'outage non si devono enumerare gli URL")
+
+    monkeypatch.setattr(gtfs_rt, "_alerts_urls", no_urls)
+    assert asyncio.run(gtfs_rt.fetch_raw_alerts_feed()) == b""
+
+    # scaduto il TTL di fallimento si riprova (qui: nessun URL configurato
+    # -> fallisce di nuovo e riarma il marker)
+    gtfs_rt._raw_alerts_fail_at = gtfs_rt.time.time() - gtfs_rt.RAW_ALERTS_FAIL_TTL - 1
+    monkeypatch.setattr(gtfs_rt, "_alerts_urls", lambda: [])
+    assert asyncio.run(gtfs_rt.fetch_raw_alerts_feed()) == b""
+    assert gtfs_rt._raw_alerts_fail_at > 0
+    gtfs_rt._raw_alerts_fail_at = 0.0

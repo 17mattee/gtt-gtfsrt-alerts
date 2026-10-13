@@ -10,7 +10,10 @@
     <meta name="theme-color" content="#f7c500">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="GTT Control">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet 1.9.4 da CDN con SRI (integrity): se unpkg venisse compromesso
+         o il file manomesso, il browser rifiuta lo script invece di eseguirlo. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
     <style>
         :root {
             --bg: #f7f7f5; --panel: #ffffff; --border: #e4e4e0; --border-soft: #efefec;
@@ -238,7 +241,8 @@
         <div id="map"></div>
     </main>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
     <script>
         const map = L.map('map', { zoomControl: false }).setView([45.0703, 7.6869], 12);
         L.control.zoom({ position: 'bottomright' }).addTo(map);

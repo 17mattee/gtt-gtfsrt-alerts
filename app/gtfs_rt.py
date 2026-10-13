@@ -58,6 +58,13 @@ ALERTS_CACHE_TTL = 20
 _alerts_cache = {"data": None, "fetched_at": 0.0}
 _raw_alerts_cache = {"data": b"", "fetched_at": 0.0}
 
+# Outage del feed alerts: per RAW_ALERTS_FAIL_TTL secondi il proxy
+# /gtfs-rt/alerts.pb NON ritenta la rete (ogni richiesta bloccherebbe il
+# worker fino a ~30s di timeout per URL) e passa subito al feed ricostruito
+# dallo snapshot.
+RAW_ALERTS_FAIL_TTL = 30
+_raw_alerts_fail_at = 0.0
+
 # Traduzione in italiano delle cause GTFS-RT (spec Google Transit).
 CAUSE_LABELS = {
     1: "Causa non specificata",
@@ -267,11 +274,16 @@ async def fetch_raw_alerts_feed() -> bytes:
     """Byte grezzi del feed alerts ufficiale (per il proxy /gtfs-rt/alerts.pb).
 
     Con cache TTL di 20s: richieste ravvicinate di client diversi non
-    generano altrettante chiamate verso i server GTT. Vuoto se offline.
+    generano altrettante chiamate verso i server GTT. Vuoto se offline
+    (il chiamante ricostruisce il feed dallo snapshot): durante un outage
+    prolungato non si ritenta la rete per RAW_ALERTS_FAIL_TTL secondi.
     """
+    global _raw_alerts_fail_at
     cached = _raw_alerts_cache["data"]
     if cached and (time.time() - _raw_alerts_cache["fetched_at"]) < ALERTS_CACHE_TTL:
         return cached
+    if _raw_alerts_fail_at and (time.time() - _raw_alerts_fail_at) < RAW_ALERTS_FAIL_TTL:
+        return b""
     for url in _alerts_urls():
         try:
             async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
@@ -279,9 +291,11 @@ async def fetch_raw_alerts_feed() -> bytes:
             if response.status_code == 200 and b"<html" not in response.content[:200].lower():
                 _raw_alerts_cache["data"] = response.content
                 _raw_alerts_cache["fetched_at"] = time.time()
+                _raw_alerts_fail_at = 0.0
                 return response.content
         except Exception as exc:
             logger.warning("Feed alerts ufficiale non raggiungibile (%s): %s", url, exc)
+    _raw_alerts_fail_at = time.time()
     return b""
 
 

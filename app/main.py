@@ -273,15 +273,20 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             cycle += 1
 
-            # Cold start: solo al PRIMO messaggio si attende un sync reale;
-            # se GTT pubblica zero mezzi, si mostra zero (dato reale).
+            # Cold start: al PRIMO messaggio si attende un sync reale SOLO se
+            # lo snapshot e' davvero vecchio. Di notte GTT puo' pubblicare
+            # zero mezzi (dato reale mostrato come tale): senza questa guardia
+            # OGNI nuovo client rimetteva in moto una sync completa, e col
+            # lock di serializzazione N client = N sync in coda verso GTT.
             payload = get_network_snapshot()
             if cycle == 1 and not payload.get("vehicles"):
-                try:
-                    payload = await fetch_all_gtt_data()
-                except Exception as exc:
-                    logger.error("Primo sync fallito (%s): payload di emergenza.", exc)
-                    payload = _fallback_payload()
+                meta = payload.get("meta") or {}
+                if (time.time() - (meta.get("last_update") or 0)) > 15:
+                    try:
+                        payload = await fetch_all_gtt_data()
+                    except Exception as exc:
+                        logger.error("Primo sync fallito (%s): payload di emergenza.", exc)
+                        payload = _fallback_payload()
 
             # Ottimizzazione traffico: le parti DINAMICHE (mezzi, corse, meta)
             # si inviano a ogni ciclo; le parti STATICHE (avvisi, catalogo,
