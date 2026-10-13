@@ -283,7 +283,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 meta = payload.get("meta") or {}
                 if (time.time() - (meta.get("last_update") or 0)) > 15:
                     try:
-                        payload = await fetch_all_gtt_data()
+                        # Timeout difensivo: con un feed GTT lento/giu' la sync
+                        # completa puo' metterci ~30-60s. Il primo messaggio NON
+                        # deve restare appeso ('Caricamento flotta...' eterno):
+                        # oltre 25s si invia lo snapshot disponibile e i cicli
+                        # successivi (ogni 2s) portano i dati freschi.
+                        payload = await asyncio.wait_for(fetch_all_gtt_data(), timeout=25)
+                    except asyncio.TimeoutError:
+                        logger.info("⚠️ [WS] Cold start: sync oltre 25s, invio lo snapshot disponibile (i dati freschi arrivano coi cicli successivi).")
                     except Exception as exc:
                         logger.error("Primo sync fallito (%s): payload di emergenza.", exc)
                         payload = _fallback_payload()

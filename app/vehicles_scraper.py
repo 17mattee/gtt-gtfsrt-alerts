@@ -46,6 +46,12 @@ TURIN_BBOX = {"lat_min": 44.0, "lat_max": 46.0, "lon_min": 6.0, "lon_max": 9.0}
 # Sorgente dell'ultimo fetch: "live" (feed ufficiale GTT) oppure "unavailable".
 last_fetch_source = "unknown"
 
+# Outage del feed posizioni (server GTT giu', verificato dal vivo): dopo un
+# fallimento TOTALE della cascata non si ritenta per 30s, altrimenti ogni ciclo
+# di sync (~3s) brucia ~30s di timeout HTTP e rallenta ritardi e avvisi.
+VEHICLES_FAIL_TTL = 30
+_last_fail_at = 0.0
+
 # Il feed veicoli di GTT NON trasmette il campo speed: lo calcoliamo dalla
 # distanza tra posizioni GPS consecutive (dato reale, mai inventato).
 _previous_positions: dict = {}  # vehicle_id -> (lat, lon, timestamp)
@@ -95,8 +101,14 @@ async def fetch_gtt_vehicle_positions() -> list:
     Politica dati: nessuna flotta simulata. Se GTT non pubblica posizioni,
     viene restituita una lista vuota e lo stato diventa 'unavailable':
     la Control Room mostra la verita', mai mezzi inventati.
+    Durante un outage la cascata non viene ritentata per VEHICLES_FAIL_TTL
+    (backoff): l'isteresi di gtt_full_sync mantiene la flotta in ultima
+    posizione nota, marcatata come datata.
     """
-    global last_fetch_source
+    global last_fetch_source, _last_fail_at
+    if _last_fail_at and (time.time() - _last_fail_at) < VEHICLES_FAIL_TTL:
+        last_fetch_source = "unavailable"
+        return []
     vehicles = []
     print("🔍 [SCRAPER] Avvio telemetria flotta GTT (GTFS-RT Vehicle Positions)...")
 
@@ -154,6 +166,7 @@ async def fetch_gtt_vehicle_positions() -> list:
             # Feed raggiunto: mostra ESATTAMENTE quello che GTT pubblica,
             # anche se in questo momento sono pochissimi mezzi.
             last_fetch_source = "live"
+            _last_fail_at = 0.0
             if vehicles:
                 current_ids = {v["vehicle_id"] for v in vehicles}
                 for stale in list(set(_previous_positions) - current_ids):
@@ -170,6 +183,7 @@ async def fetch_gtt_vehicle_positions() -> list:
 
     # Nessun endpoint raggiungibile: lista vuota, MAI mezzi inventati.
     last_fetch_source = "unavailable"
+    _last_fail_at = time.time()
     print("🛑 [SCRAPER] Feed posizioni GTT non raggiungibile: nessun dato pubblicato, nessun mezzo simulato (politica dati reali).")
     return []
 

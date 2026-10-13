@@ -261,3 +261,26 @@ def test_hysteresis_outage_mantiene_flotta():
     kept = _apply_fleet_hysteresis([])  # feed_down=False
     assert kept == [], "zero mezzi pubblicati col feed attivo e' un dato reale: il mezzo esce"
     _recent_vehicles.clear()
+
+
+def test_vehicles_negative_backoff_durante_outage(monkeypatch):
+    """Feed posizioni giu': backoff di 30s, niente cascata di timeout a ogni ciclo."""
+    import asyncio
+    import time as _t
+    from app import vehicles_scraper as vs
+
+    vs._last_fail_at = _t.time()  # outage appena avvenuto
+
+    def no_endpoints():
+        raise AssertionError("durante il backoff non si devono enumerare gli endpoint")
+
+    monkeypatch.setattr(vs, "_vehicle_endpoints", no_endpoints)
+    assert asyncio.run(vs.fetch_gtt_vehicle_positions()) == []
+    assert vs.last_fetch_source == "unavailable"
+
+    # scaduto il backoff si riprova: cascata vuota = nuovo fallimento -> marker riarmedato
+    vs._last_fail_at = _t.time() - vs.VEHICLES_FAIL_TTL - 1
+    monkeypatch.setattr(vs, "_vehicle_endpoints", lambda: [])
+    assert asyncio.run(vs.fetch_gtt_vehicle_positions()) == []
+    assert vs._last_fail_at > 0
+    vs._last_fail_at = 0.0
