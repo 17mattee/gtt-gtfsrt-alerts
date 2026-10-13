@@ -110,13 +110,13 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- Sicurezza: header di risposta + CSP contro XSS/clickjacking/injection ---
-# NB: il jolly *.tile.openstreetmap.org NON copre il dominio esatto: entrambi
-# vanno elencati, altrimenti Safari/Chrome bloccano le tiles della mappa.
+# Leaflet e' self-hosted in /static/vendor: NESSUNA origine di terze parti
+# e' piu' necessaria per script e stili. La source map di Leaflet e' same-origin
+# e il suo fetch resta consentito da connect-src 'self' (nessun warning console).
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://unpkg.com; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
-    "font-src https://fonts.gstatic.com; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
     "https://services.arcgisonline.com https://*.arcgisonline.com; "
     "connect-src 'self' ws: wss:"

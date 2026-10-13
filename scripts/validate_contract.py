@@ -79,11 +79,16 @@ def validate_http(base):
         time.sleep(5)
     check("health: campi e tipi corretti", ok, detail)
 
-    print("\n[2] Dashboard, SRI e manifest")
+    print("\n[2] Dashboard, Leaflet self-hosted e manifest")
     status, _, body = http_get(f"{base}/")
     html = body.decode("utf-8", "replace") if isinstance(body, bytes) else ""
     check("dashboard servita (200)", status == 200)
-    check("SRI su Leaflet (integrity sha384)", 'integrity="sha384-' in html)
+    check("Leaflet self-hosted (nessun CDN di terze parti)", "/static/vendor/leaflet/leaflet.js" in html and "unpkg.com/leaflet" not in html)
+    s, _, _ = http_get(f"{base}/static/vendor/leaflet/leaflet.js")
+    check("leaflet.js servito localmente (200)", s == 200)
+    s, _, _ = http_get(f"{base}/static/vendor/leaflet/leaflet.js.map")
+    check("source map leaflet raggiungibile same-origin (nessun warning CSP)", s == 200)
+    check("meta mobile-web-app-capable presente", 'name="mobile-web-app-capable"' in html)
     check("frontend aggiornato (etaMinutes, d-early)", "etaMinutes" in html and "d-early" in html)
     check("nessun marker colorato con delay null (?? 0 rimosso)", "v.delay_seconds ?? 0" not in html)
     s, _, _ = http_get(f"{base}/static/manifest.webmanifest")
