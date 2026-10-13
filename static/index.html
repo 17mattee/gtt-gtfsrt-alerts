@@ -117,10 +117,25 @@
         .badge.info { background: #2563eb; color: #fff; }
 
         #map { flex: 1; min-width: 0; }
-        /* Scorrimento fluido dei mezzi: la durata precisa la imposta il JS
-           (tempo reale tra due fix GPS). Durante pan/zoom si disattiva. */
-        .veh-icon { transition: transform 3s linear; }
+        /* --- Mezzi sulla mappa: alto contrasto, mai 'trasparenti' ---
+           Transizione gestita SOLO via JS (attiva unicamente per un fix GPS
+           nuovo con mappa ferma): mai default, cosi' pan/zoom non trascinano
+           marker in giro. La classe .veh-dot gira con la freccia (cerchio =
+           invariato alla rotazione). */
+        .veh-icon { will-change: transform; }
         body.map-moving .veh-icon { transition: none !important; }
+        .veh-inner { position: relative; width: 14px; height: 14px; }
+        .veh-dot { display: block; width: 14px; height: 14px; border-radius: 50%;
+                   border: 2.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+        .veh-dot.d-ok { background: #1a8a4a; }
+        .veh-dot.d-early { background: #2563eb; }
+        .veh-dot.d-warn { background: #d97706; }
+        .veh-dot.d-late { background: #dc2626; }
+        .veh-dot.d-nd { background: #6f6f6a; }
+        .veh-dot.stale { opacity: .45; }
+        .veh-arrow { position: absolute; top: -7px; left: 50%; margin-left: -3.5px; width: 0; height: 0;
+                     border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
+                     border-bottom: 7px solid #1a1a1a; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
         .leaflet-control-attribution { background: rgba(255,255,255,0.85) !important; color: #444 !important; }
         .leaflet-bar a { background: #fff; color: #333 !important; }
 
@@ -278,10 +293,13 @@
         // Timestamp dell'ultimo fix GPS mostrato per mezzo: base per la
         // durata dello scorrimento fluido tra due fix reali.
         const _prevFixTs = {};
-        // Durante pan/zoom della mappa Leaflet riposiziona i marker: le
-        // transizioni vanno sospese o i mezzi "resterebbero indietro".
+        // Durante pan/zoom Leaflet riposiziona i marker: le transizioni vanno
+        // sospese, e la classe si toglie UN FRAME DOPO la fine (evitando la
+        // race con il riposizionamento finale dei marker, che altrimenti
+        // partiva con la transizione attiva e li faceva 'sbandare').
         map.on('movestart zoomstart', () => document.body.classList.add('map-moving'));
-        map.on('moveend zoomend', () => document.body.classList.remove('map-moving'));
+        const _mapMovingOff = () => requestAnimationFrame(() => document.body.classList.remove('map-moving'));
+        map.on('moveend zoomend', _mapMovingOff);
         // Popup persistente: sopravvive ai refresh (si riapre sullo stesso mezzo
         // con dati aggiornati) finche' l'utente non lo chiude.
         let openPopupVehicle = null;
@@ -580,12 +598,14 @@
                 !!(unavailable || degraded || delaysDown));
 
             /* --- Mappa: con una linea selezionata si vedono SOLO i suoi mezzi ---
-               I marker si RIUSANO tra i cicli (mai ricreati da zero): cosi' la
-               transizione CSS anima il movimento dello STESSO elemento e il
-               marker avanza in continuo tra due fix GPS REALI di GTT (che
-               pubblica ~1 fix per mezzo ogni 20-25s) invece di saltare di
-               ~200 metri. Nessuna posizione inventata: entrambi gli estremi
-               del movimento sono fix ufficiali. */
+               I marker si RIUSANO tra i cicli SENZA MAI ricreare l'elemento
+               del DOM (setIcon ricrea l'elemento e rompe le transizioni: era
+               la causa degli marker che 'sbandavano' durante lo zoom). Il
+               contenuto (pallino/freccia) si aggiorna in place con innerHTML,
+               e la transizione transform si attiva SOLO quando arriva un fix
+               GPS NUOVO del mezzo e la mappa e' ferma (mai durante pan/zoom):
+               il marker avanza in continuo tra due fix reali di GTT invece
+               di saltare ~200m. Nessuna posizione inventata. */
             renderingMarkers = true;
             const bounds = [];
             const seenVehicles = new Set();
@@ -598,43 +618,40 @@
                 seenVehicles.add(v.vehicle_id);
 
                 const delay = v.delay_seconds;
-                const color = delayColor(delay);
                 const bearing = Number(v.bearing || 0);
-                const arrow = bearing
-                    ? `<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%) rotate(${bearing}deg);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid ${color};"></div>`
-                    : '';
-                // GPS datato oltre 2 minuti (raro: ~1,5% della flotta): marker
-                // attenuato — dato vecchio reso VISIBLE, non nascosto.
+                // GPS datato oltre 2 minuti (raro): pallino attenuato, dato
+                // vecchio reso visibile, non nascosto.
                 const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
-                const dotHtml = `<div style="position:relative;width:13px;height:13px;">${arrow}<div style="width:13px;height:13px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.25);${gpsStale ? 'opacity:.45;' : ''}"></div></div>`;
-                const icon = L.divIcon({ className: 'veh-icon', html: dotHtml, iconSize: [13, 13] });
+                const dotCls = delay == null ? 'd-nd'
+                    : delay <= -120 ? 'd-early'
+                    : delay < 120 ? 'd-ok'
+                    : delay <= 300 ? 'd-warn' : 'd-late';
+                const inner = `<div class="veh-inner"${bearing ? ` style="transform:rotate(${bearing}deg)"` : ''}>`
+                    + (bearing ? `<span class="veh-arrow" style="border-bottom-color:${delayColor(delay)}"></span>` : '')
+                    + `<span class="veh-dot ${dotCls}${gpsStale ? ' stale' : ''}"></span></div>`;
 
                 let marker = markersByVehicle[v.vehicle_id];
-                if (marker) {
-                    marker.setLatLng([lat, lon]);
-                    marker.setIcon(icon);
-                    if (marker.getPopup()) marker.setPopupContent(vehiclePopup(v, routesCatalog, alerts));
-                } else {
-                    marker = L.marker([lat, lon], { icon });
+                const curTs = Number(v.timestamp) || 0;
+                if (!marker) {
+                    marker = L.marker([lat, lon], { icon: L.divIcon({ className: 'veh-icon', html: inner, iconSize: [14, 14] }) });
                     marker.bindPopup(vehiclePopup(v, routesCatalog, alerts), { maxWidth: 300 });
                     marker.on('click', () => { openPopupVehicle = v.vehicle_id; });
                     markersLayer.addLayer(marker);
+                    markersByVehicle[v.vehicle_id] = marker;
                 }
-                markersByVehicle[v.vehicle_id] = marker;
-
-                // Durata dello scorrimento = tempo REALE trascorso tra i due
-                // fix dello stesso mezzo (clampato): il movimento copre
-                // esattamente l'intervallo tra i dati ufficiali.
+                // Transizione SOLO per fix nuovo e mappa ferma: lo scorrimento
+                // dura quanto il tempo REALE tra i due fix del mezzo (clamp 1-25s).
                 const el = marker.getElement();
-                const curTs = Number(v.timestamp) || 0;
-                if (el && curTs) {
-                    const prevTs = _prevFixTs[v.vehicle_id];
-                    if (prevTs && curTs > prevTs) {
-                        const dur = Math.min(30, Math.max(1, curTs - prevTs));
-                        el.style.transition = `transform ${dur}s linear`;
-                    }
-                    _prevFixTs[v.vehicle_id] = curTs;
+                const prevTs = _prevFixTs[v.vehicle_id];
+                const mapIdle = !document.body.classList.contains('map-moving');
+                if (el) {
+                    el.style.transition = (prevTs && curTs > prevTs && mapIdle)
+                        ? `transform ${Math.min(25, Math.max(1, curTs - prevTs))}s linear` : 'none';
                 }
+                marker.setLatLng([lat, lon]);
+                if (el) el.innerHTML = inner;  // contenuto aggiornato, wrapper intatto
+                if (curTs) _prevFixTs[v.vehicle_id] = curTs;
+                if (marker.getPopup()) marker.setPopupContent(vehiclePopup(v, routesCatalog, alerts));
             }
             // I mezzi usciti dalla selezione/feed escono dalla mappa (con la
             // stessa isteresi del backend: chi e' ancora in flotta resta).

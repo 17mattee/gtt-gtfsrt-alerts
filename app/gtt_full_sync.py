@@ -198,7 +198,13 @@ def _derive_delay_from_arrival(sequence, rt_arrival_ts, tolerance=300):
 DEFAULT_ALERT = {
     "alert_id": "gtt-alert-01",
     "header": "Regolarità sulla rete tranviaria e metropolitana di Torino.",
+    "description": "Nessun avviso ufficiale pubblicato da GTT in questo momento.",
     "affected_routes": ["4", "15", "M1"],
+    "cause": 1,
+    "effect": 8,
+    "cause_label": "Causa non specificata",
+    "effect_label": "Effetto non specificato",
+    "category": "informazione",
 }
 
 
