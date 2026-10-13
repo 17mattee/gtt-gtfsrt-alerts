@@ -234,3 +234,30 @@ def test_raw_alerts_negative_cache_durante_outage(monkeypatch):
     assert asyncio.run(gtfs_rt.fetch_raw_alerts_feed()) == b""
     assert gtfs_rt._raw_alerts_fail_at > 0
     gtfs_rt._raw_alerts_fail_at = 0.0
+
+
+def test_hysteresis_outage_mantiene_flotta():
+    """Feed posizioni IRraggiungibile: le ultime posizioni note restano 10 min."""
+    from app.gtt_full_sync import _apply_fleet_hysteresis, _recent_vehicles, VEHICLE_GRACE_SECONDS, VEHICLE_OUTAGE_GRACE_SECONDS
+    _recent_vehicles.clear()
+    _apply_fleet_hysteresis([{"vehicle_id": "9001U", "latitude": 45.0, "longitude": 7.6}])
+
+    # feed GIU' (unavailable): oltre la grazia normale i mezzi RESTANO
+    entry = _recent_vehicles["9001U"]
+    entry["seen_at"] -= VEHICLE_GRACE_SECONDS + 60  # ~3 min di silenzio feed
+    kept = _apply_fleet_hysteresis([], feed_down=True)
+    assert len(kept) == 1, "durante un outage l'ultima posizione nota resta visibile"
+
+    # oltre i 10 minuti escono comunque: troppo vecchio per essere utile
+    entry["seen_at"] -= VEHICLE_OUTAGE_GRACE_SECONDS
+    kept = _apply_fleet_hysteresis([], feed_down=True)
+    assert kept == [], "oltre la grazia estesa il mezzo esce (dato troppo vecchio)"
+
+    # di notte il feed risponde (live) ma e' vuoto: grazia NORMALE, non estesa
+    _recent_vehicles.clear()
+    _apply_fleet_hysteresis([{"vehicle_id": "9001U"}])
+    entry = _recent_vehicles["9001U"]
+    entry["seen_at"] -= VEHICLE_GRACE_SECONDS + 60
+    kept = _apply_fleet_hysteresis([])  # feed_down=False
+    assert kept == [], "zero mezzi pubblicati col feed attivo e' un dato reale: il mezzo esce"
+    _recent_vehicles.clear()

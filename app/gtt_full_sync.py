@@ -40,19 +40,30 @@ SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogn
 # che significa rientro reale al deposito o fine servizio. (Misurato sul
 # feed reale: 16 mezzi su 183 lampeggiano tra due letture consecutive.)
 VEHICLE_GRACE_SECONDS = 120
+# Outage del feed posizioni (server GTT giu'): le ULTIME POSIZIONI REALI NOTE
+# restano visibili fino a 10 minuti, chiaramente marcate come datate (la UI
+# attenua i marker >120s e segnala il feed giu' nella status bar). Mai oltre:
+# superati i 10 minuti il dato e' troppo vecchio per essere utile. Di notte il
+# feed e' raggiungibile ma vuoto (source 'live'): in quel caso vale la grazia
+# normale di 120s, perche' zero mezzi pubblicati e' un dato REALE, non un guasto.
+VEHICLE_OUTAGE_GRACE_SECONDS = 600
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
-def _apply_fleet_hysteresis(fresh_vehicles: list) -> list:
+def _apply_fleet_hysteresis(fresh_vehicles: list, feed_down: bool = False) -> list:
     """Unisce le posizioni fresche con i mezzi visti di recente.
 
     - I mezzi presenti nel feed aggiornano posizione e orario di avvistamento.
-    - I mezzi assenti da piu' di VEHICLE_GRACE_SECONDS escono (deposito reale).
+    - I mezzi assenti da piu' della grazia escono (deposito reale o fine servizio).
     - I mezzi assenti da poco restano con l'ultima posizione nota (GPS datato
       viene gia' segnalato in UI tramite il loro vecchio timestamp).
     - Se il feed intero salta un ciclo, la flotta resta visibile (nessun blackout).
+    - Se il feed e' INRAGGIUNGIBILE (feed_down), la grazia si estende a 10 min:
+      le ultime posizioni reali note restano sulla mappa, marcate come datate,
+      invece di svuotarla durante un outage GTT.
     """
     now = time.time()
+    grace = VEHICLE_OUTAGE_GRACE_SECONDS if feed_down else VEHICLE_GRACE_SECONDS
     for v in fresh_vehicles:
         vid = v.get("vehicle_id")
         if vid:
@@ -65,8 +76,8 @@ def _apply_fleet_hysteresis(fresh_vehicles: list) -> list:
         entry = _recent_vehicles.get(vid)
         if entry is None:
             continue
-        if now - entry["seen_at"] > VEHICLE_GRACE_SECONDS:
-            _recent_vehicles.pop(vid, None)  # rientrato al deposito: silenzio > 2 minuti
+        if now - entry["seen_at"] > grace:
+            _recent_vehicles.pop(vid, None)  # silenzio oltre la grazia: rientro reale
         else:
             kept.append(entry["data"])
     return kept
@@ -286,7 +297,10 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
     # mai per un ciclo GPS perso del feed GTT.
     raw_vehicle_count = len(vehicles)
-    vehicles = _apply_fleet_hysteresis(vehicles)
+    vehicles = _apply_fleet_hysteresis(
+        vehicles,
+        feed_down=(getattr(vehicles_scraper, "last_fetch_source", "") == "unavailable"),
+    )
     if len(vehicles) != raw_vehicle_count:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
