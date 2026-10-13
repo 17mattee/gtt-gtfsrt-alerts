@@ -313,3 +313,24 @@ def test_trip_updates_buffer_su_fallimento_transitorio(monkeypatch):
     gtfs_rt._trip_updates_cache["fetched_at"] -= gtfs_rt.TRIP_UPDATES_STALE_TTL + 1
     terza = asyncio.run(gtfs_rt.fetch_gtt_trip_updates())
     assert terza == [] and gtfs_rt.last_trip_updates_source == "unavailable"
+
+
+def test_catalogo_stale_durante_outage_totale():
+    """Outage GTT lungo: il catalogo resta 215 linee (stale), NON crolla a 73."""
+    import asyncio
+    from app import gtfs_static as gs
+    from app.gtfs_static import gtfs_manager
+
+    gtfs_manager._routes_cache = {"4": "x", "15": "y"}
+    gtfs_manager._cache_loaded_at = 0.0  # cache SCADUTA (outage da oltre 1h)
+    gtfs_manager._cache_source = "gtfs-static-ufficiale"
+
+    async def fail_download():
+        return {}
+
+    gtfs_manager._download_routes = fail_download
+    result = asyncio.run(gtfs_manager.load_routes())
+    assert result == {"4": "x", "15": "y"}, "deve servire il catalogo stale, non il fallback"
+    assert gtfs_manager._cache_loaded_at > 0, "cache ri-datata: niente download a ogni ciclo"
+    gtfs_manager._routes_cache = {}
+    gtfs_manager._cache_source = "fallback"

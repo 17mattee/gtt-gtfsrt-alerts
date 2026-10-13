@@ -318,7 +318,20 @@ class GtfsStaticManager:
                 print(f"✅ [CATALOGO] GTFS-Static ufficiale scaricato: {len(self._routes_cache)} linee reali della rete GTT catalogate.")
                 return dict(self._routes_cache)
 
-            print(f"🌐 [CATALOGO] Server GTT non raggiungibili: attivo fallback locale con {len(FALLBACK_ROUTES)} linee reali di Torino.")
+            # Refresh fallito ma catalogo GIÀ scaricato in passato: si serve lo
+            # STALE (le 215 linee restano valide per giorni — il GTFS cambia
+            # raramente) invece di crollare al fallback di 73 linee dopo il
+            # TTL di un'ora. Il catalogo viene ri-datato: nuovo tentativo di
+            # refresh tra un'ora, senza scaricare a ogni ciclo durante un
+            # outage. E' cio' che tiene la Control Room indipendente anche
+            # quando GTT sta avendo un outage totale (verificato dal vivo
+            # il 13/10/2026: feed GTFS-RT rimossi con HTTP 404).
+            if self._routes_cache:
+                self._cache_loaded_at = time.time()
+                print(f"🌐 [CATALOGO] Refresh non riuscito: mantengo il catalogo STALE di {len(self._routes_cache)} linee (riprovo tra {CACHE_TTL_SECONDS // 3600}h).")
+                return dict(self._routes_cache)
+
+            print(f"🌐 [CATALOGO] Server GTT non raggiungibili e nessun catalogo mai scaricato: fallback locale con {len(FALLBACK_ROUTES)} linee reali di Torino.")
             self._cache_source = "fallback"
             return dict(FALLBACK_ROUTES)
 
