@@ -42,8 +42,8 @@
         .brand p { font-size: 0.68rem; color: var(--text-3); margin-top: 1px; }
         .kpis { display: flex; gap: 18px; margin-left: auto; align-items: center; }
         .kpi { text-align: right; }
-        .kpi b { display: block; font-size: 0.98rem; font-weight: 700; line-height: 1.1; }
-        .kpi label { font-size: 0.58rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+        .kpi b { display: block; font-size: 1.05rem; font-weight: 700; line-height: 1.1; }
+        .kpi label { font-size: 0.62rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
         .kpi.w b { color: var(--warn); } .kpi.d b { color: var(--late); } .kpi.v b { color: #7c3aed; }
         .live { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--text-2); font-weight: 600; }
         .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
@@ -57,7 +57,7 @@
         aside { width: 420px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 
         .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-        .tab-btn { flex: 1; padding: 11px 4px; background: none; border: none; color: var(--text-2); font-weight: 600; font-size: 0.8rem; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab-btn { flex: 1; padding: 12px 4px; background: none; border: none; color: var(--text-2); font-weight: 600; font-size: 0.85rem; cursor: pointer; border-bottom: 2px solid transparent; }
         .tab-btn.active { color: var(--text); border-bottom-color: var(--logo); }
 
         .lines-panel { border-bottom: 1px solid var(--border-soft); padding: 12px 16px 13px; flex-shrink: 0; }
@@ -70,7 +70,7 @@
         .chip.all-chip { padding: 0 10px; }
 
         .filter-bar { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
-        .filter-bar input { width: 100%; background: var(--soft); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 11px; font-size: 0.8rem; outline: none; }
+        .filter-bar input { width: 100%; background: var(--soft); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 9px 12px; font-size: 0.9rem; outline: none; }
         .filter-bar input:focus { border-color: var(--text-3); background: var(--panel); }
 
         .feed-section { flex: 1; overflow-y: auto; padding: 10px 16px 16px; display: none; }
@@ -82,7 +82,7 @@
         .line-group-title:first-child { margin-top: 2px; }
         .line-group-title .route-name { color: var(--text-3); font-weight: 500; text-transform: none; letter-spacing: 0; }
 
-        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 6px; font-size: 0.83rem; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; font-size: 0.88rem; display: flex; align-items: center; gap: 10px; cursor: pointer; }
         .card:hover { background: var(--soft); }
         .card.alert { border-left: 3px solid var(--warn); cursor: default; display: block; padding: 11px 13px; }
         .card.detour { border-left: 3px solid #7c3aed; cursor: default; display: block; padding: 11px 13px; background: var(--soft); }
@@ -104,11 +104,11 @@
         .card.d-early { border-left: 3px solid #2563eb; }
         .card.d-warn { border-left: 3px solid var(--warn); }
         .card.d-late { border-left: 3px solid var(--late); }
-        .card strong { color: var(--text); display: block; font-size: 0.83rem; font-weight: 600; }
-        .card span { color: var(--text-2); font-size: 0.74rem; }
+        .card strong { color: var(--text); display: block; font-size: 0.88rem; font-weight: 600; }
+        .card span { color: var(--text-2); font-size: 0.79rem; line-height: 1.3; }
         .card .card-info { white-space: nowrap; }
 
-        .line-badge { min-width: 40px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; flex-shrink: 0; padding: 0 6px; }
+        .line-badge { min-width: 42px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.84rem; flex-shrink: 0; padding: 0 7px; }
 
         .badge { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 0.6rem; font-weight: 700; margin-right: 6px; text-transform: uppercase; letter-spacing: 0.02em; }
         .badge.detour { background: #7c3aed; color: #fff; }
@@ -139,13 +139,13 @@
         .leaflet-control-attribution { background: rgba(255,255,255,0.85) !important; color: #444 !important; }
         .leaflet-bar a { background: #fff; color: #333 !important; }
 
-        .statusbar { padding: 9px 16px; font-size: 0.74rem; background: var(--panel); border-top: 1px solid var(--border); color: var(--text-2); display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-weight: 500; }
+        .statusbar { padding: 10px 16px; font-size: 0.8rem; line-height: 1.35; background: var(--panel); border-top: 1px solid var(--border); color: var(--text-2); display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-weight: 500; }
 
         .leaflet-popup-content-wrapper { border-radius: 10px; }
-        .popup-route { font-weight: 700; font-size: 0.9rem; color: #1a1a1a; }
-        .popup-big-delay { font-size: 1.15rem; font-weight: 700; margin: 3px 0 2px; }
-        .popup-label { color: #8a8a86; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-        .popup-row { color: #4a4a46; font-size: 0.78rem; margin-top: 2px; }
+        .popup-route { font-weight: 700; font-size: 1.0rem; color: #1a1a1a; }
+        .popup-big-delay { font-size: 1.35rem; font-weight: 700; margin: 4px 0 2px; }
+        .popup-label { color: #8a8a86; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+        .popup-row { color: #4a4a46; font-size: 0.86rem; margin-top: 3px; line-height: 1.35; }
         .popup-alerts { margin-top: 7px; padding-top: 7px; border-top: 1px solid #efefec; }
 
         /* ---------- Smartphone ---------- */
@@ -158,8 +158,8 @@
             .kpis { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 14px; padding-bottom: 2px; }
             .kpis::-webkit-scrollbar { display: none; }
             .kpi { text-align: left; flex-shrink: 0; }
-            .kpi b { font-size: 0.86rem; }
-            .kpi label { font-size: 0.54rem; }
+            .kpi b { font-size: 0.95rem; }
+            .kpi label { font-size: 0.6rem; }
 
             /* Corpo: mappa sopra (40% dello schermo), pannello sotto con piu' spazio */
             main { flex-direction: column-reverse; }
@@ -182,7 +182,7 @@
 
             /* Ricerca: input a 16px -> iOS NON fa l'auto-zoom al focus */
             .filter-bar { padding: 8px 10px; }
-            .filter-bar input { font-size: 16px; padding: 9px 12px; border-radius: 8px; }
+            .filter-bar input { font-size: 16px; padding: 11px 12px; border-radius: 8px; }
 
             /* LEGGIBILITA' CARD: font piu' grandi, area di tocco >= 44px,
                piu' respiro tra una card e l'altra, testo che va a capo */
@@ -198,7 +198,7 @@
             .card.alert span, .card.detour span { font-size: 0.84rem; line-height: 1.45; }
 
             /* Tab piu' alte e leggibili col pollice */
-            .tab-btn { padding: 13px 4px; font-size: 0.85rem; }
+            .tab-btn { padding: 14px 4px; font-size: 0.92rem; }
 
             /* Popup della mappa mai piu' largo dello schermo */
             .leaflet-popup-content { max-width: 230px !important; }
@@ -416,12 +416,25 @@
 
         /* ---------- WebSocket ---------- */
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        let ws = null, reconnectAttempts = 0;
+        let ws = null, reconnectAttempts = 0, lastMsgAt = Date.now();
         let staticCache = null;
+        // WATCHDOG: se il WebSocket si blocca a meta' connessione (mezzo-aperto:
+        // nessun messaggio MA nemmeno l'evento 'close'), la UI resterebbe
+        // congelata su dati vecchi senza alcun errore visibile. Oltre 15s
+        // senza messaggi si forza la chiusura: scatta la riconnessione
+        // automatica gia' esistente (backoff fino a 15s).
+        setInterval(() => {
+            if (ws && Date.now() - lastMsgAt > 15000) {
+                setStatus('Nessun dato da ' + Math.round((Date.now() - lastMsgAt) / 1000) + ' secondi: riconnessione in corso…', true);
+                setLive('warn', 'RICONNESSIONE');
+                try { ws.close(); } catch (err) { /* gia' chiuso */ }
+            }
+        }, 5000);
         function connectWebSocket() {
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
             ws.onopen = () => {
                 reconnectAttempts = 0;
+                lastMsgAt = Date.now();
                 staticCache = null;  // il primo messaggio riarmera' la cache statica
                 setLive('ok', 'LIVE');
             };
@@ -434,6 +447,7 @@
             };
             ws.onerror = () => ws.close();
             ws.onmessage = (event) => {
+                lastMsgAt = Date.now();
                 try {
                     const message = JSON.parse(event.data);
                     const data = message.data || message;
@@ -597,7 +611,7 @@
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 
             setLive(unavailable ? 'off' : degraded || delaysDown || delaysCached ? 'warn' : 'ok',
-                    unavailable ? 'OFFLINE' : degraded ? 'FEED DEGRADATO' : delaysDown ? 'RITARDI N/D' : delaysCached ? 'RITARDI BUFFER' : 'LIVE');
+                    unavailable ? 'GTT OFFLINE' : degraded ? 'GTT DEGRADATO' : delaysDown ? 'RITARDI GTT N/D' : delaysCached ? 'RITARDI BUFFER' : 'LIVE');
 
             setStatus(
                 unavailable ? 'Feed posizioni GTT non raggiungibile: la mappa si repopola appena GTT riprende a trasmettere.'
@@ -795,8 +809,11 @@
                     </div>`;
                 }
             }
-            document.getElementById('vehicles-list').innerHTML = html ||
-                '<div class="card"><strong>Nessun veicolo pubblicato da GTT in questo momento</strong><span>Appena GTT trasmette, i mezzi appaiono da soli.</span></div>';
+            const src = (lastData && lastData.meta && lastData.meta.vehicles_source) || '';
+            const vuoto = html ? '' : (src === 'unavailable'
+                ? '<div class="card"><strong>GTT non raggiungibile in questo istante</strong><span>Non e\' un problema della Control Room: il servizio e\' attivo e la mappa si aggiorna da sola appena GTT riprende a trasmettere.</span></div>'
+                : '<div class="card"><strong>Nessun veicolo pubblicato da GTT in questo momento</strong><span>Appena GTT trasmette, i mezzi appaiono da soli.</span></div>');
+            document.getElementById('vehicles-list').innerHTML = html || vuoto;
         }
 
         function renderDelaysList(tripUpdates, meta) {
