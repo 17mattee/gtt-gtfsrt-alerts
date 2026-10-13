@@ -19,7 +19,7 @@
 - **215-line catalog** — the complete official route catalog, downloaded dynamically from GTT's GTFS-Static feed and refreshed hourly.
 - **Bullet-proof resilience** — multi-endpoint cascade on every data source with circuit breaker and caches. If GTT changes its website, the service keeps working.
 - **Real data only** — the Control Room shows exactly what GTT publishes. If GTT's vehicle feed goes quiet (their-side outage), the status bar says so and the map repopulates automatically when they resume — no simulated vehicles, ever.
-- **Control Room UI** — dark-mode Leaflet dashboard with color-coded markers (green on time / orange 2–5 min late / red >5 min), live tabs for fleet, delays and alerts, auto-reconnect WebSocket.
+- **Control Room UI** — dark-mode Leaflet dashboard with color-coded markers (green on time ±2 min / blue >2 min early / orange 2–5 min late / red >5 min), live tabs for fleet, delays and alerts, auto-reconnect WebSocket.
 
 ## Architecture
 

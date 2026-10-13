@@ -111,6 +111,31 @@ def _match_next_stop(sequence, rt_arrival_ts, delay_seconds, tolerance=300):
             best_stop, best_dist = stop_id, d
     return best_stop if best_dist is not None and best_dist <= tolerance else None
 
+
+def _predict_next_stop(sequence, delay_seconds, now=None):
+    """Prossima fermata prevista di una corsa: (epoch_arrivo, stop_id) o None.
+
+    Metodo standard di previsione: orario programmato (GTFS-Static) + ritardo
+    ufficiale della corsa. Le fermate GTFS oltre la mezzanotte usano orari
+    24:00+ (nel feed GTT arrivano a 26:xx) e appartengono alla giornata di
+    servizio PRECEDENTE: si provano entrambe le mezzanotti locali di Roma
+    (oggi e ieri) e si tiene la previsione valida piu' vicina nel tempo.
+    """
+    if not sequence:
+        return None
+    now = time.time() if now is None else now
+    offset = _rome_offset_seconds(now)
+    # Mezzanotte di Roma piu' recente in epoch (la mezzanotte locale CEST e'
+    # alle 22:00 UTC del giorno prima, quindi e' a midnight UTC - offset).
+    base = ((now + offset) // 86400) * 86400 - offset
+    best = None
+    for sched, stop_id in sequence:
+        for day_base in (base - 86400, base):
+            predicted = day_base + sched + delay_seconds
+            if predicted >= now - 60 and (best is None or predicted < best[0]):
+                best = (predicted, stop_id)
+    return best
+
 DEFAULT_ALERT = {
     "alert_id": "gtt-alert-01",
     "header": "Regolarità sulla rete tranviaria e metropolitana di Torino.",
@@ -223,6 +248,11 @@ async def fetch_all_gtt_data() -> dict:
     # Mai il ritardo di una corsa terminata.
     from collections import defaultdict
 
+    # Feed ritardi GTT non raggiungibile in questo ciclo: il ritardo dei mezzi
+    # resta 'n/d' (datetto unknown), MAI un finto 'in orario' che nasconderebbe
+    # ritardi reali.
+    trips_feed_down = getattr(gtfs_rt, "last_trip_updates_source", "") == "unavailable"
+
     updates_by_vehicle = defaultdict(list)
     for tu in trip_updates:
         if tu.get("vehicle_id"):
@@ -283,6 +313,11 @@ async def fetch_all_gtt_data() -> dict:
             v["delay_seconds"] = chosen["delay_seconds"]
         elif v.get("trip_id") in delay_by_trip:
             v["delay_seconds"] = delay_by_trip[v["trip_id"]]
+        elif v.get("delay_seconds") is not None:
+            # Mezzo tenuto dall'isteresi: conserva l'ultimo ritardo noto.
+            pass
+        elif trips_feed_down:
+            v["delay_seconds"] = None  # feed ritardi giu': ritardo sconosciuto, non 'in orario'
         else:
             # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
             v["delay_seconds"] = 0
@@ -331,22 +366,11 @@ async def fetch_all_gtt_data() -> dict:
                 seq = trip_sequences.get(tid)
                 if not seq:
                     continue
-                now = time.time()
-                offset = _rome_offset_seconds(now)
-                # Mezzanotte di Roma in epoch: la mezzanotte locale CEST e' alle
-                # 22:00 UTC del giorno prima, quindi e' a (midnight UTC - offset).
-                base = ((now + offset) // 86400) * 86400 - offset
-                delay = v["delay_seconds"]
-                prediction = None
-                for sched, stop_id in seq:
-                    predicted = base + sched + delay
-                    if predicted >= now - 60:  # tolleranza fermata appena passata
-                        prediction = (predicted, stop_id)
-                        break
-                if prediction:
+                prediction = _predict_next_stop(seq, v["delay_seconds"])
+                if prediction is not None:
                     predicted, stop_id = prediction
-                    minutes = round((predicted - now) / 60)
-                    if 0 <= minutes <= 60:  # la prossima fermata deve essere plausibile
+                    minutes = round((predicted - time.time()) / 60)
+                    if -1 <= minutes <= 60:  # la prossima fermata deve essere plausibile
                         stop = stops_catalog.get(stop_id) or {}
                         name = stop.get("name") or stop_id
                         m2 = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", name)
@@ -354,7 +378,7 @@ async def fetch_all_gtt_data() -> dict:
                         incoh = False
                         if stop.get("lat") and stop.get("lon"):
                             dist = _haversine_meters(v.get("latitude", 0), v.get("longitude", 0), stop["lat"], stop["lon"])
-                            remaining = predicted - now
+                            remaining = predicted - time.time()
                             if dist > 500 and remaining > 0 and (dist / remaining) > 30.0:
                                 incoh = True
                         v["next_stop"] = {
@@ -364,7 +388,10 @@ async def fetch_all_gtt_data() -> dict:
                             "incoerente": incoh,
                             "calcolata": True,
                         }
-                break  # elabora solo la prima corsa coerente trovata
+                # Si passa alla corsa successiva solo se questa non ha prodotto
+                # una previsione (es. cambio corsa: la chosen e' gia' terminata).
+                if v.get("next_stop"):
+                    break
 
         # PRECISIONE D'ARRIVO: prossima fermata con nome reale (GTFS-Static) e
         # minuti all'arrivo previsti da GTT. Con verifica di coerenza: se il GPS

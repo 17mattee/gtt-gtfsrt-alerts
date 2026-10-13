@@ -301,18 +301,25 @@ async def fetch_gtt_trip_updates() -> list:
             if not entity.HasField("trip_update"):
                 continue
             tu = entity.trip_update
-            # RITARDO: si prende l'ultimo StopTimeUpdate con delay = previsione
-            # attuale della corsa (verificato sui dati GTT: coincide col ritardo
-            # della prossima fermata; le fermate passate portano ritardi vecchi).
-            delay = None
+            # RITARDO ATTUALE della corsa. Il feed GTT pubblica piu' fermate
+            # per corsa, in ordine di percorso: la PRIMA e' la fermata piu'
+            # vicina al mezzo (la prossima fermata), le successive sono
+            # previsioni sempre piu' lontane (spesso mostrano recupero a fine
+            # corsa). Il ritardo attuale e' quindi quello della PRIMA fermata
+            # con delay; usare l'ultima sovrastimava sistematicamente gli
+            # anticipi di fine corsa (verificato sul feed reale: il 26% delle
+            # corse cambia classe orario/ritardo/anticipo).
+            # Precedenza standard GTFS-RT: TripUpdate.delay se presente.
+            delay = tu.delay if tu.HasField("delay") else None
             # PROSSIMA FERMATA: primo StopTimeUpdate con orario d'arrivo nel futuro,
             # con stop_id e orario previsto (per la precisione sull'arrivo reale).
             next_stop = None
             for stu in tu.stop_time_update:
-                if stu.HasField("arrival") and stu.arrival.HasField("delay"):
-                    delay = stu.arrival.delay
-                elif stu.HasField("departure") and stu.departure.HasField("delay"):
-                    delay = stu.departure.delay
+                if delay is None:
+                    if stu.HasField("arrival") and stu.arrival.HasField("delay"):
+                        delay = stu.arrival.delay
+                    elif stu.HasField("departure") and stu.departure.HasField("delay"):
+                        delay = stu.departure.delay
                 if next_stop is None:
                     arr_ts = None
                     if stu.HasField("arrival") and stu.arrival.time:

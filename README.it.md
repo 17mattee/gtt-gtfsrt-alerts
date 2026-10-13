@@ -19,7 +19,7 @@
 - **Catalogo di 215 linee** — il catalogo completo ufficiale delle linee, scaricato dinamicamente dal feed GTFS-Static di GTT e rinnovato ogni ora.
 - **Resilienza a prova di bomba** — cascata multi-endpoint su ogni fonte dati con circuit breaker e cache. Se GTT cambia sito, il servizio continua a funzionare.
 - **Solo dati veri** — la Control Room mostra esattamente ciò che GTT pubblica. Se il feed veicoli di GTT si blocca (guasto loro), la barra di stato lo dichiara e la mappa si repopola da sola quando riprendono — mai mezzi simulati.
-- **Control Room** — dashboard Leaflet in dark mode con marker colorati (verde in orario / arancio 2-5 min / rosso oltre 5 min), tab live per flotta, ritardi e avvisi, WebSocket con riconnessione automatica.
+- **Control Room** — dashboard Leaflet in dark mode con marker colorati (verde in orario ±2 min / blu oltre 2 min in anticipo / arancio 2-5 min di ritardo / rosso oltre 5 min), tab live per flotta, ritardi e avvisi, WebSocket con riconnessione automatica.
 
 ## Architettura
 

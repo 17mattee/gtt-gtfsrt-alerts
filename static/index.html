@@ -95,6 +95,7 @@
         .street-chip.back { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
         .street-arrow { color: var(--text-3); font-size: 0.7rem; }
         .card.d-ok { border-left: 3px solid var(--ok); }
+        .card.d-early { border-left: 3px solid #2563eb; }
         .card.d-warn { border-left: 3px solid var(--warn); }
         .card.d-late { border-left: 3px solid var(--late); }
         .card strong { color: var(--text); display: block; font-size: 0.83rem; font-weight: 600; }
@@ -428,22 +429,28 @@
         }
 
         /* ---------- Formattazione: testo e colore sempre coerenti ---------- */
+        // Soglie (verificate sul feed GTT reale): |delay| <= 2 min = in orario,
+        // oltre 2 min in anticipo = blu (il mezzo parte in anticipo, rischio di
+        // perderlo), 2-5 min di ritardo = arancione, oltre 5 min = rosso.
+        // delay null = feed ritardi GTT non disponibile: MAI mostrato come orario.
         function fmtDelay(seconds) {
-            if (seconds == null) seconds = 0;
+            if (seconds == null) return 'ritardo n/d';
             const min = Math.floor(Math.abs(seconds) / 60);
             if (min < 1) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
             return min + ' min di ritardo';
         }
         function delayClass(seconds) {
-            if (seconds == null) seconds = 0;
-            if (seconds < 0 || seconds <= 120) return 'd-ok';
+            if (seconds == null) return '';
+            if (seconds <= -120) return 'd-early';
+            if (seconds <= 120) return 'd-ok';
             if (seconds <= 300) return 'd-warn';
             return 'd-late';
         }
         function delayColor(seconds) {
-            if (seconds == null) seconds = 0;
-            if (seconds < 0 || seconds <= 120) return '#1a8a4a';
+            if (seconds == null) return '#6f6f6a';
+            if (seconds <= -120) return '#2563eb';
+            if (seconds <= 120) return '#1a8a4a';
             if (seconds <= 300) return '#d97706';
             return '#dc2626';
         }
@@ -460,8 +467,18 @@
         }
         function fmtVehicleType(routeId) { return TYPE_LABEL[typeOf(routeId)] || 'Mezzo'; }
 
+        // Minuti all'arrivo CALCOLATI ORA dall'orario previsto (arrival_ts):
+        // restano corretti anche tra due push WebSocket o per un mezzo col
+        // GPS in isteresi (minutes congelato all'ultimo avvistamento).
+        function etaMinutes(nextStop) {
+            if (!nextStop) return null;
+            if (nextStop.arrival_ts) {
+                return Math.max(0, Math.round((Number(nextStop.arrival_ts) - Date.now() / 1000) / 60));
+            }
+            return nextStop.minutes != null ? Number(nextStop.minutes) : null;
+        }
         function vehiclePopup(v, routesCatalog, alerts) {
-            const delay = v.delay_seconds ?? 0;
+            const delay = v.delay_seconds;
             const gpsAge = v.timestamp ? Math.max(0, Math.round(Date.now() / 1000 - Number(v.timestamp))) : null;
             const gpsTime = v.timestamp ? new Date(Number(v.timestamp) * 1000).toLocaleTimeString('it-IT') : 'n/d';
             const lineAlerts = alerts.filter(al => (al.affected_routes || []).includes(v.route_id));
@@ -477,7 +494,8 @@
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
             if (v.next_stop) {
-                html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + ' · tra ' + v.next_stop.minutes + ' min</div>';
+                const eta = etaMinutes(v.next_stop);
+                html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + (eta != null ? (eta > 0 ? ' · tra ' + eta + ' min' : ' · in arrivo') : '') + '</div>';
                 if (v.next_stop.incoerente) {
                     html += '<div class="popup-row" style="color:#b96b00;">⚠ Previsione GTT non coerente con la posizione GPS attuale</div>';
                 }
@@ -522,7 +540,7 @@
             document.getElementById('active-vehicles').innerText = vehicles.length;
             document.getElementById('active-alerts').innerText = alerts.length;
             document.getElementById('active-detours').innerText = detours;
-            document.getElementById('delayed-trips').innerText = delayedTrips;
+            document.getElementById('delayed-trips').innerText = delaysDown ? 'n/d' : delayedTrips;
             document.getElementById('active-routes').innerText = Object.keys(routesCatalog).length;
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 
@@ -576,7 +594,7 @@
 
             renderLinesPanel();
             renderFleetList();
-            renderDelaysList(tripUpdates);
+            renderDelaysList(tripUpdates, meta);
 
             /* --- Avvisi: deviazioni in testa, spiegazione chiara --- */
             const order = { deviazione: 0, interruzione: 1, fermata_spostata: 2, ritardo: 3, servizio_ridotto: 4 };
@@ -686,7 +704,14 @@
                 '<div class="card"><strong>Nessun veicolo pubblicato da GTT in questo momento</strong><span>Appena GTT trasmette, i mezzi appaiono da soli.</span></div>';
         }
 
-        function renderDelaysList(tripUpdates) {
+        function renderDelaysList(tripUpdates, meta) {
+            // Feed ritardi GTT non disponibile: messaggio onesto, mai un finto
+            // "nessun ritardo" che farebbe sembrare in orario l'intera rete.
+            if (meta && meta.trip_updates_source === 'unavailable') {
+                document.getElementById('delays-list').innerHTML =
+                    '<div class="card"><strong>Ritardi momentaneamente non disponibili</strong><span>Il feed Trip Updates di GTT non risponde: appena riprende, i ritardi reali di ogni corsa tornano qui.</span></div>';
+                return;
+            }
             const withDelay = tripUpdates.filter(tu => tu.delay_seconds != null)
                 .sort((a, b) => b.delay_seconds - a.delay_seconds);
             document.getElementById('delays-list').innerHTML = withDelay.length ? withDelay.slice(0, 200).map(tu => {
