@@ -13,6 +13,7 @@ e nessun errore di persistenza può mai compromettere il servizio real-time.
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from supabase import Client, create_client
@@ -21,6 +22,17 @@ logger = logging.getLogger("GTT-Database")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# THROTTLE DEDICATO per le posizioni GPS (time-series): e' di gran lunga la
+# tabella piu' voluminosa. Con ~490 mezzi in strada, salvare le posizioni a
+# ogni ciclo di persistenza (30s) genera ~1,4 milioni di righe AL GIORNO
+# (~300 MB/giorno tra righe e indici): il free tier Supabase (500 MB) si
+# satura in circa un giorno e mezzo e il project va in pausa.
+# Di default si salva una posizione ogni 10 minuti per mezzo (~70k righe/giorno,
+# ~15 MB/giorno): lo storico resta utile per le analisi e il database respira.
+# Cadenza diversa se serve piu' granularita': POSITIONS_PERSIST_SECONDS=300.
+POSITIONS_PERSIST_INTERVAL_SECONDS = int(os.getenv("POSITIONS_PERSIST_SECONDS", "600"))
+_last_positions_persist_at = 0.0
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -67,35 +79,46 @@ async def save_network_data_to_db(data: dict):
         except Exception as exc:
             logger.error(f"Errore upsert gtt_routes: {exc}")
 
-    # 2. Mezzi + 3. posizioni GPS (time-series)
+    # 2. Mezzi (upsert leggero a ogni persist) + 3. posizioni GPS
+    #    (time-series: salvate con il throttle dedicato, vedi sopra).
     vehicles = data.get("vehicles", [])
     if vehicles:
         vehicle_rows = []
         position_rows = []
         seen = set()
+        positions_due = False
+        global _last_positions_persist_at
+        now = time.time()
+        if now - _last_positions_persist_at >= POSITIONS_PERSIST_INTERVAL_SECONDS:
+            _last_positions_persist_at = now
+            positions_due = True
         for v in vehicles:
             v_id = v.get("vehicle_id")
             if not v_id or v_id in seen:
                 continue
             seen.add(v_id)
             vehicle_rows.append({"vehicle_id": v_id, "agency_id": "GTT", "last_seen": _now_iso()})
-            position_rows.append({
-                "vehicle_id": v_id,
-                "trip_id": v.get("trip_id"),
-                "route_id": v.get("route_id") if v.get("route_id") != "N/A" else None,
-                "latitude": v.get("latitude"),
-                "longitude": v.get("longitude"),
-                "bearing": v.get("bearing"),
-                "speed": v.get("speed"),
-                "timestamp": v.get("timestamp"),
-                "recorded_at": _now_iso(),
-            })
+            if positions_due:
+                position_rows.append({
+                    "vehicle_id": v_id,
+                    "trip_id": v.get("trip_id"),
+                    "route_id": v.get("route_id") if v.get("route_id") != "N/A" else None,
+                    "latitude": v.get("latitude"),
+                    "longitude": v.get("longitude"),
+                    "bearing": v.get("bearing"),
+                    "speed": v.get("speed"),
+                    "timestamp": v.get("timestamp"),
+                    "recorded_at": _now_iso(),
+                })
         try:
             for batch in _batched(vehicle_rows):
                 supabase.table("gtt_vehicles").upsert(batch, on_conflict="vehicle_id").execute()
-            for batch in _batched(position_rows):
-                supabase.table("gtt_vehicle_positions").insert(batch).execute()
-            saved.append(f"{len(vehicle_rows)} mezzi e {len(position_rows)} posizioni GPS")
+            if position_rows:
+                for batch in _batched(position_rows):
+                    supabase.table("gtt_vehicle_positions").insert(batch).execute()
+                saved.append(f"{len(vehicle_rows)} mezzi e {len(position_rows)} posizioni GPS")
+            else:
+                saved.append(f"{len(vehicle_rows)} mezzi")
         except Exception as exc:
             logger.error(f"Errore salvataggio veicoli/posizioni: {exc}")
 

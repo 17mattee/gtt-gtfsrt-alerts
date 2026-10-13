@@ -122,7 +122,7 @@ export SUPABASE_KEY="<tua-service-role-o-anon-key>"
 uvicorn app.main:app --reload
 ```
 
-Il middleware salva così, a ogni ciclo di refresh: il catalogo delle 215 linee, i mezzi della flotta con ultimo avvistamento, una riga GPS per mezzo (time-series) e lo storico completo di avvisi/deviazioni — con `category` (`deviazione`, `interruzione`, `ritardo`, ...), cause/effetti in italiano e linee coinvolte.
+Il middleware salva così: il catalogo delle 215 linee e i mezzi della flotta con ultimo avvistamento a ogni ciclo di refresh, una riga GPS per mezzo (time-series) ogni 10 minuti di default, e lo storico completo di avvisi/deviazioni — con `category` (`deviazione`, `interruzione`, `ritardo`, ...), cause/effetti in italiano e linee coinvolte.
 
 ### Opzionale
 
@@ -130,6 +130,7 @@ Il middleware salva così, a ogni ciclo di refresh: il catalogo delle 215 linee,
 |---|---|
 | `DATABASE_URL` | Attiva la persistenza psycopg dello storico allerte |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Invia un messaggio Telegram se il portale GTT cambia layout o lo scraper fallisce |
+| `POSITIONS_PERSIST_SECONDS` | Cadenza di scrittura delle posizioni GPS per mezzo (default `600` = 10 min). Con ~490 mezzi il default tiene il database free tier ampiamente sotto quota; abbassala solo se serve piu' granularita' di storico |
 
 ## Test e QA
 

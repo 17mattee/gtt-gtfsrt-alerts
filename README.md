@@ -122,7 +122,7 @@ export SUPABASE_KEY="<your-service-role-or-anon-key>"
 uvicorn app.main:app --reload
 ```
 
-The middleware then stores, at every refresh cycle: the 215-line catalog, fleet vehicles with last-seen, one GPS row per vehicle (time-series), and the full history of alerts/detours — with `category` (`deviazione`, `interruzione`, `ritardo`, ...), Italian cause/effect labels and affected lines.
+The middleware then stores: the 215-line catalog and fleet vehicles with last-seen at every refresh cycle, one GPS row per vehicle (time-series) every 10 minutes by default, and the full history of alerts/detours — with `category` (`deviazione`, `interruzione`, `ritardo`, ...), Italian cause/effect labels and affected lines.
 
 ### Optional
 
@@ -130,6 +130,7 @@ The middleware then stores, at every refresh cycle: the 215-line catalog, fleet 
 |---|---|
 | `DATABASE_URL` | Enables psycopg persistence of alerts history |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Sends a Telegram message when the GTT portal changes layout or the scraper fails |
+| `POSITIONS_PERSIST_SECONDS` | GPS time-series write cadence per vehicle (default `600` = 10 min). With ~490 vehicles the default keeps the free-tier database well under its quota; lower it only if you need finer history granularity |
 
 ## Tests & QA
 

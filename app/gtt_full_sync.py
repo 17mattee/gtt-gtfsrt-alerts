@@ -58,10 +58,15 @@ def _apply_fleet_hysteresis(fresh_vehicles: list) -> list:
         if vid:
             _recent_vehicles[vid] = {"data": v, "seen_at": now}
     kept = []
+    # Difensivo: anche con la sync serializzata, il dizionario e' stato
+    # condiviso (test, ecc.): un mezzo gia' rimosso non deve far crashare
+    # il conteggio con KeyError.
     for vid in list(_recent_vehicles.keys()):
-        entry = _recent_vehicles[vid]
+        entry = _recent_vehicles.get(vid)
+        if entry is None:
+            continue
         if now - entry["seen_at"] > VEHICLE_GRACE_SECONDS:
-            del _recent_vehicles[vid]  # rientrato al deposito: silenzio > 2 minuti
+            _recent_vehicles.pop(vid, None)  # rientrato al deposito: silenzio > 2 minuti
         else:
             kept.append(entry["data"])
     return kept
@@ -157,7 +162,7 @@ def _map_scraped_alert(raw: dict, idx: int) -> dict:
     }
 
 
-async def fetch_all_gtt_data() -> dict:
+async def _fetch_all_gtt_data_inner() -> dict:
     """Recupera tutti i dati della rete GTT. A prova di bomba: mai eccezioni, mai vuoto."""
     result = {
         "vehicles": [],
@@ -494,6 +499,19 @@ async def fetch_all_gtt_data() -> dict:
 
     print(f"✅ [SYNC] Sincronizzazione completata -> {len(result['vehicles'])} mezzi, {len(alerts)} avvisi, {len(result['routes_catalog'])} linee.\n")
     return result
+
+
+# Serializza le sync complete: il refresher di background e i cold-start dei
+# client WebSocket possono partire nello stesso istante (piu' tab aperte
+# insieme). Senza lock due sync si sovrappongono, raddoppiano le chiamate
+# ai feed GTT e si contendono lo stato condiviso (isteresi flotta).
+_sync_lock = asyncio.Lock()
+
+
+async def fetch_all_gtt_data() -> dict:
+    """Recupera tutti i dati della rete GTT (una sync alla volta, mai concurrently)."""
+    async with _sync_lock:
+        return await _fetch_all_gtt_data_inner()
 
 
 def get_network_snapshot() -> dict:

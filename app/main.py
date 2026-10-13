@@ -24,6 +24,8 @@ logger = logging.getLogger("GTT-Main")
 
 _last_persist_at = 0.0
 PERSIST_INTERVAL_SECONDS = 30
+_persist_in_flight = False
+_background_tasks: set = set()
 
 
 async def _persist_snapshot(data: dict) -> None:
@@ -32,12 +34,19 @@ async def _persist_snapshot(data: dict) -> None:
     Throttata a una scrittura ogni 30s: la rete pubblica ~440 posizioni per
     ciclo e senza freno riempirebbe il database (milioni di righe al giorno).
     Mai bloccante, mai fatale.
+
+    GUARDIA IN-FLIGHT: se la scrittura precedente e' ancora in corsa (DB
+    lento o project Supabase in pausa), questa viene saltata invece di
+    accumulare task (e i loro payload) in coda senza limite.
     """
-    global _last_persist_at
+    global _last_persist_at, _persist_in_flight
+    if _persist_in_flight:
+        return
     now = time.time()
     if now - _last_persist_at < PERSIST_INTERVAL_SECONDS:
         return
     _last_persist_at = now
+    _persist_in_flight = True
     try:
         from app.database_writer import save_network_data_to_db
         # save_network_data_to_db è async ma usa il client sync Supabase:
@@ -45,6 +54,8 @@ async def _persist_snapshot(data: dict) -> None:
         await asyncio.to_thread(asyncio.run, save_network_data_to_db(data))
     except Exception as exc:
         logger.warning("Persistenza su database saltata: %s", exc)
+    finally:
+        _persist_in_flight = False
 
 
 async def _background_refresher() -> None:
@@ -58,7 +69,12 @@ async def _background_refresher() -> None:
         started = time.time()
         try:
             payload = await fetch_all_gtt_data()
-            asyncio.create_task(_persist_snapshot(payload))
+            # Riferimento mantenuto al task di persistenza (pattern asyncio:
+            # un task senza riferimenti puo' essere raccolto dal GC a meta'
+            # esecuzione) con pulizia automatica a completamento.
+            task = asyncio.create_task(_persist_snapshot(payload))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
             # fetch_all_gtt_data aggiorna già lo snapshot globale
             logger.info(
                 "♻️ [REFRESHER] Snapshot rinnovato in %.1fs -> %s mezzi, %s avvisi, %s corse.",

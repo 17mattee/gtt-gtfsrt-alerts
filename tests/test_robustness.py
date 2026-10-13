@@ -78,3 +78,82 @@ def test_alerts_cache_stantica_su_fallimento_transitorio(monkeypatch):
     alerts_dopo = asyncio.run(gtfs_rt.fetch_gtt_rt_alerts())
     assert alerts_dopo == alerts_prima, "un blip di rete non deve azzerare gli avvisi"
     assert gtfs_rt.last_alerts_source == "unavailable"
+
+
+def test_persist_guard_in_flight(monkeypatch):
+    """Persistenza gia' in corso: la successiva si salta, niente code infinite."""
+    import asyncio
+    import app.main as main_mod
+    import app.database_writer as dw
+
+    chiamate = {"n": 0}
+
+    async def slow_save(data):
+        chiamate["n"] += 1
+        await asyncio.sleep(0.1)
+
+    monkeypatch.setattr(dw, "save_network_data_to_db", slow_save)
+    main_mod._last_persist_at = 0.0
+    main_mod._persist_in_flight = True  # una scrittura e' ancora in volo
+    asyncio.run(main_mod._persist_snapshot({"vehicles": []}))
+    assert chiamate["n"] == 0, "con una persistenza in corso non ne deve partire un'altra"
+    main_mod._persist_in_flight = False
+    asyncio.run(main_mod._persist_snapshot({"vehicles": []}))
+    assert chiamate["n"] == 1
+
+
+def test_persist_throttle_concorrente(monkeypatch):
+    """Due persist chieste insieme: entra solo la prima (throttle + guard)."""
+    import asyncio
+    import app.main as main_mod
+    import app.database_writer as dw
+
+    in_volo = {"n": 0, "picco": 0}
+
+    async def slow_save(data):
+        in_volo["n"] += 1
+        in_volo["picco"] = max(in_volo["picco"], in_volo["n"])
+        await asyncio.sleep(0.15)
+        in_volo["n"] -= 1
+
+    monkeypatch.setattr(dw, "save_network_data_to_db", slow_save)
+    main_mod._last_persist_at = 0.0
+    main_mod._persist_in_flight = False
+
+    async def run():
+        await asyncio.gather(
+            main_mod._persist_snapshot({"vehicles": []}),
+            main_mod._persist_snapshot({"vehicles": []}),
+        )
+
+    asyncio.run(run())
+    assert in_volo["picco"] == 1, "una sola scrittura Supabase alla volta"
+
+
+def test_posizioni_gps_throttle_dedicato():
+    """Le posizioni GPS non si salvano a ogni persist: cadenza dedicata."""
+    import app.database_writer as dw
+
+    dw._last_positions_persist_at = 0.0
+    now = 1_000_000.0
+    # prima volta: dovute
+    assert (now - dw._last_positions_persist_at) >= dw.POSITIONS_PERSIST_INTERVAL_SECONDS
+    dw._last_positions_persist_at = now
+    # 30s dopo (il throttle generale delle persist): posizioni NON dovute
+    now += 30
+    assert (now - dw._last_positions_persist_at) < dw.POSITIONS_PERSIST_INTERVAL_SECONDS
+    # dopo l'intervallo dedicato: dovute di nuovo
+    now += dw.POSITIONS_PERSIST_INTERVAL_SECONDS
+    assert (now - dw._last_positions_persist_at) >= dw.POSITIONS_PERSIST_INTERVAL_SECONDS
+
+
+def test_hysteresis_sopravvive_a_rimozioni_concorrenti():
+    """Un mezzo rimosso dal dizionario tra lo snapshot e l'iterazione non crasha."""
+    import app.gtt_full_sync as fs
+
+    fs._recent_vehicles.clear()
+    fs._apply_fleet_hysteresis([{"vehicle_id": "9001U", "latitude": 45.0, "longitude": 7.6}])
+    # simula la rimozione avvenuta altrove tra list(keys) e l'accesso
+    fs._recent_vehicles.pop("9001U", None)
+    kept = fs._apply_fleet_hysteresis([])
+    assert kept == []
