@@ -157,3 +157,12 @@ def test_hysteresis_sopravvive_a_rimozioni_concorrenti():
     fs._recent_vehicles.pop("9001U", None)
     kept = fs._apply_fleet_hysteresis([])
     assert kept == []
+
+
+def test_titolo_avviso_non_solo_data():
+    """Titolo scraper: la prima frase e' solo data/orario -> include la frase utile."""
+    t1 = scraper._title_from_text("13/10/2026 09:15. Linee 4, 15 deviate causa lavori. Dettagli nel sito.")
+    assert "Linee 4, 15 deviate" in t1, "il titolo non deve essere solo la data"
+    assert t1.startswith("13/10/2026")
+    t2 = scraper._title_from_text("Linee 4 e 15 deviate causa lavori. Dettagli nel sito.")
+    assert t2 == "Linee 4 e 15 deviate causa lavori"

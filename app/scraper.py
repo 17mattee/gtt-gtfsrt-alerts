@@ -113,6 +113,20 @@ def _request_gtt_page():
     response.raise_for_status()
     return response.text
 
+def _title_from_text(text: str) -> str:
+    """Titolo dell'avviso: la prima frase del testo.
+
+    Se la prima "frase" e' solo data/orario (es. '13/10/2026 09:15'), il
+    titolo include anche la frase successiva, altrimenti la Control Room
+    mostrerebbe un titolo inutile fatto solo dalla data.
+    """
+    segments = text.split(".")
+    title = segments[0].strip()
+    if len(title) < 25 and len(segments) > 1 and segments[1].strip():
+        title = f"{title}. {segments[1].strip()}"
+    return title[:100].strip(" .")
+
+
 def fetch_gtt_alerts():
     alerts = []
     try:
@@ -130,7 +144,7 @@ def fetch_gtt_alerts():
         
         for idx, text in enumerate(unique_texts):
             route_ids = extract_route_ids(text)
-            title_match = text.split(".")[0] if "." in text else text[:60]
+            title_match = _title_from_text(text)
 
             # ID STABILE dall'avviso stesso: senza di cio' ogni sync genererebbe
             # un id nuovo (contenuto identico) e lo storico Supabase si
