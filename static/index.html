@@ -530,6 +530,15 @@
                 (v.headsign
                     ? 'Direzione: ' + esc(v.headsign) + (v.bearing ? ' <span style="color:#8a8a86;font-weight:500;">(verso ' + fmtDirection(v.bearing).toLowerCase() + ')</span>' : '')
                     : 'direzione ' + fmtDirection(v.bearing)) + '</div>';
+            if (v.capolinea) {
+                const cap = v.capolinea;
+                const capTxt = cap.stato === 'sosta'
+                    ? 'In sosta al capolinea: ' + esc(cap.nome)
+                    : cap.stato === 'attesa_partenza'
+                    ? 'In attesa di partire da: ' + esc(cap.nome)
+                    : 'In arrivo al capolinea: ' + esc(cap.nome);
+                html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + capTxt + '</div>';
+            }
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
             if (v.next_stop) {
@@ -782,7 +791,7 @@
                     const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;min-width:0;"><strong>Mezzo ${esc(v.vehicle_id)}${v.headsign ? ' → ' + esc(v.headsign) : ''}</strong></div>
-                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${gpsStale ? ' · GPS datato' : ''}</span>
+                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${v.capolinea ? (v.capolinea.stato === 'sosta' ? ' · in sosta al capolinea' : v.capolinea.stato === 'attesa_partenza' ? ' · in attesa alla partenza' : ' · in arrivo al capolinea') : ''}${gpsStale ? ' · GPS datato' : ''}</span>
                     </div>`;
                 }
             }

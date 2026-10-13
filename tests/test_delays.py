@@ -219,3 +219,37 @@ def test_prev_stop_name():
     assert _prev_stop_name(seq, "S_1400", stops) is None
     # stop_id non in sequenza: nessuna stima a caso
     assert _prev_stop_name(seq, "S_9999", stops) is None
+
+
+def test_capolinea_tre_stati():
+    """Stato capolinea: in arrivo (prossima=ultima), sosta, attesa partenza."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _capolinea_state
+
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()  # 14:00 Roma
+    seq = [(46800, "S_A"), (50400, "S_B")]  # 11:00 e 12:00 UTC: partenza passata, arrivo = adesso
+    stops = {
+        "S_A": {"name": "Fermata 1 - PORTA NUOVA", "lat": 45.0, "lon": 7.6},
+        "S_B": {"name": "Fermata 2 - RIVOLI CAP", "lat": 45.0, "lon": 7.6015},  # ~120m da (45.0,7.6)
+    }
+
+    # IN ARRIVO: la prossima fermata e' l'ultima della corsa (segnale preciso)
+    r = _capolinea_state(45.0, 7.6, 5.0, seq, 0, "S_B", stops, now)
+    assert r == {"stato": "in_arrivo", "stop_id": "S_B"}
+
+    # IN SOSTA: fermo, entro 150m dal capolinea di arrivo, orario (con ritardo) scaduto
+    r = _capolinea_state(45.0, 7.6015, 0.5, seq, 0, None, stops, now)
+    assert r["stato"] == "sosta" and r["stop_id"] == "S_B"
+
+    # IN ATTESA ALLA PARTENZA: corsa che deve ancora partire, bus fermo al primo stop
+    seq_future = [(61200, "S_A"), (64800, "S_B")]  # parte 15:00 UTC: futuro
+    r = _capolinea_state(45.0, 7.6, None, seq_future, 0, None, stops, now)
+    assert r["stato"] == "attesa_partenza" and r["stop_id"] == "S_A"
+
+    # IN SERVIZIO: in movimento, lontano dai capolinei -> nessuno stato
+    r = _capolinea_state(45.05, 7.65, 8.0, seq, 0, "S_X", stops, now)
+    assert r is None
+
+    # bus in movimento vicino al capolinea: NON e' in sosta (si sta per fermare... o sta passando)
+    r = _capolinea_state(45.0, 7.6015, 9.0, seq, 0, None, stops, now)
+    assert r is None, "un bus in movimento non e' 'in sosta al capolinea'"

@@ -160,6 +160,12 @@ async def validate_ws(base_ws, max_vehicles=50_000):
             ts = v.get("timestamp")
             if not isinstance(ts, int) or ts > now + 120:
                 problems.append(f"timestamp non valido: {ts}")
+            cap = v.get("capolinea")
+            if cap is not None:
+                if cap.get("stato") not in ("in_arrivo", "sosta", "attesa_partenza"):
+                    problems.append(f"stato capolinea non valido: {cap.get('stato')}")
+                if not isinstance(cap.get("nome"), str) or not cap.get("nome"):
+                    problems.append("capolinea.nome mancante")
             ns = v.get("next_stop")
             if ns is not None:
                 if not isinstance(ns.get("name"), str) or not ns.get("name"):

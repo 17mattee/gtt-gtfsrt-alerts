@@ -17,7 +17,7 @@ from app import gtfs_rt
 from app import vehicles_scraper
 from app.gtfs_static import gtfs_manager
 from app.gtfs_rt import fetch_gtt_rt_alerts, fetch_gtt_trip_updates
-from app.vehicles_scraper import fetch_gtt_vehicle_positions
+from app.vehicles_scraper import fetch_gtt_vehicle_positions, _haversine_meters
 
 logger = logging.getLogger("GTT-FullSync")
 
@@ -133,6 +133,65 @@ def _match_next_stop(sequence, rt_arrival_ts, delay_seconds, tolerance=300):
         if best_dist is None or d < best_dist:
             best_stop, best_dist = stop_id, d
     return best_stop if best_dist is not None and best_dist <= tolerance else None
+
+
+CAPOLINEA_SOSTA_RADIUS_M = 150
+CAPOLINEA_PARTENZA_RADIUS_M = 100
+CAPOLINEA_SPEED_FERMO_MS = 1.5
+
+
+def _terminus_epoch(sched, delay, now):
+    """Orario previsto (schedulato + ritardo) piu' plausibile tra le due mezzanotti."""
+    offset = _rome_offset_seconds(now)
+    base = ((now + offset) // 86400) * 86400 - offset
+    return min((b + sched + delay for b in (base - 86400, base)), key=lambda t: abs(t - now))
+
+
+def _capolinea_state(lat, lon, speed, seq, delay, next_stop_id, stops, now=None):
+    """Stato capolinea del mezzo sulla corsa corrente, o None se in servizio.
+
+    Algoritmo a tre stati, calibrato su misure reali GTT (13/10/2026):
+    - in_arrivo: la PROSSIMA fermata e' l'ultima della corsa (segnale preciso
+      dalla catena next_stop gia' validata, nessuna soglia geometrica);
+    - sosta: al capolinea di arrivo, PRATICAMENTE FERMO (speed < 1.5 m/s o
+      n/d al primo avvistamento), orario previsto (col ritardo) scaduto e
+      entro 150m dal capolinea (i bus in sosta misurati: fermi al 100% dei
+      casi entro 150m);
+    - attesa_partenza: al capolinea di partenza, fermo, orario di partenza
+      ancora futuro, entro 100m dal primo stop (i bus in attesa misurati:
+      mediana 15m).
+    """
+    now = time.time() if now is None else now
+    if not seq or delay is None or lat is None:
+        return None
+    if len(seq) < 2:
+        return None
+    fermo = speed is None or speed < CAPOLINEA_SPEED_FERMO_MS
+    sched_last, last_stop = seq[-1]
+    sched_first, first_stop = seq[0]
+
+    # 1) IN ARRIVO: la prossima fermata e' il capolinea di arrivo
+    if next_stop_id and next_stop_id == last_stop:
+        return {"stato": "in_arrivo", "stop_id": last_stop}
+
+    sl = stops.get(last_stop) or {}
+    sf = stops.get(first_stop) or {}
+
+    # 2) IN SOSTA al capolinea di arrivo
+    if fermo and sl.get("lat"):
+        d = _haversine_meters(lat, lon, sl["lat"], sl["lon"])
+        arr_last = _terminus_epoch(sched_last, delay, now)
+        if d <= CAPOLINEA_SOSTA_RADIUS_M and arr_last <= now:
+            return {"stato": "sosta", "stop_id": last_stop, "distanza_m": round(d)}
+
+    # 3) IN ATTESA ALLA PARTENZA (capolinei diversi: le corse circolari
+    #    con capolineo unico sono gia' coperte dallo stato 'sosta')
+    if fermo and sf.get("lat") and first_stop != last_stop:
+        d = _haversine_meters(lat, lon, sf["lat"], sf["lon"])
+        dep_first = _terminus_epoch(sched_first, delay, now)
+        if d <= CAPOLINEA_PARTENZA_RADIUS_M and dep_first > now:
+            return {"stato": "attesa_partenza", "stop_id": first_stop, "distanza_m": round(d)}
+    return None
 
 
 def _prev_stop_name(sequence, stop_id, stops_catalog):
@@ -503,6 +562,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
                                 incoh = True
                         v["next_stop"] = {
                             "name": clean_name,
+                            "stop_id": stop_id,
                             "arrival_ts": predicted,
                             "minutes": max(0, minutes),
                             "incoerente": incoh,
@@ -524,6 +584,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
             remaining = next_stop.get("arrival_ts", 0) - time.time()
             entry = {
                 "name": stop.get("name") or next_stop.get("stop_id") or "fermata",
+                "stop_id": next_stop.get("stop_id"),
                 "arrival_ts": next_stop.get("arrival_ts"),
                 "minutes": max(0, round(remaining / 60)),
                 "incoerente": False,
@@ -559,6 +620,24 @@ async def _fetch_all_gtt_data_inner() -> dict:
                 if dist > 500 and (dist / remaining) > 30.0:
                     entry["incoerente"] = True
             v["next_stop"] = entry
+
+        # STATO CAPOLINEA: in arrivo / in sosta / in attesa della partenza
+        # (algoritmo calibrato su misure reali, vedi _capolinea_state). Solo
+        # dati ufficiali: sequenza fermate della corsa, GPS, velocita' reale,
+        # ritardo. In servizio normale il campo resta assente (mai inventato).
+        cap_seq = trip_sequences.get(chosen_tid) or trip_sequences.get(own_tid)
+        if cap_seq and v.get("delay_seconds") is not None:
+            cap = _capolinea_state(
+                v.get("latitude"), v.get("longitude"), v.get("speed"),
+                cap_seq, v["delay_seconds"],
+                (v.get("next_stop") or {}).get("stop_id"),
+                stops_catalog,
+            )
+            if cap:
+                nome = _terminus_name(cap["stop_id"])
+                if nome:
+                    cap["nome"] = nome
+                    v["capolinea"] = cap
 
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates
