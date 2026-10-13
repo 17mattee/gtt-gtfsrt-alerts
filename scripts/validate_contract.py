@@ -60,7 +60,7 @@ def validate_http(base):
     # Cold start: il primo sync (catalogo GTFS ~12MB + feed) impiega alcuni
     # secondi; last_update arriva null finche' non completa — si riprova.
     ok, detail, health = False, "nessuna risposta", {}
-    for attempt in range(7):  # fino a ~30s
+    for attempt in range(13):  # fino a ~60s: durante un outage GTT il primo sync e' lento
         status, _, body = http_get(f"{base}/health")
         if status == 200:
             try:
