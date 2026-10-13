@@ -40,30 +40,37 @@ SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogn
 # che significa rientro reale al deposito o fine servizio. (Misurato sul
 # feed reale: 16 mezzi su 183 lampeggiano tra due letture consecutive.)
 VEHICLE_GRACE_SECONDS = 120
-# Outage del feed posizioni (server GTT giu'): le ULTIME POSIZIONI REALI NOTE
-# restano visibili fino a 10 minuti, chiaramente marcate come datate (la UI
-# attenua i marker >120s e segnala il feed giu' nella status bar). Mai oltre:
-# superati i 10 minuti il dato e' troppo vecchio per essere utile. Di notte il
-# feed e' raggiungibile ma vuoto (source 'live'): in quel caso vale la grazia
-# normale di 120s, perche' zero mezzi pubblicati e' un dato REALE, non un guasto.
-VEHICLE_OUTAGE_GRACE_SECONDS = 600
+# POLITICA FRESCHEZZA (esplicita, voluta): sulla mappa si mostra SOLO dove i
+# mezzi SONO adesso. Un fix GPS piu' vecchio di 2 minuti non viene mostrato
+# (mai posizioni datate spacciate per attuali), e nemmeno fix con timestamp
+# NEL FUTURO (feed GTT corrotto: verificato dal vivo il 13/10/2026, un'entita'
+# col timestamp a +49 minuti). Blip GPS di 1-2 cicli: coperti dalla grazia
+# normale di isteresi; outage piu' lunghi: mappa vuota e status bar onesta.
+MAX_GPS_AGE_SECONDS = 120
+MAX_GPS_FUTURE_SECONDS = 90
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
-def _apply_fleet_hysteresis(fresh_vehicles: list, feed_down: bool = False) -> list:
+def _filter_fresh_positions(vehicles: list, now: float = None) -> list:
+    """Solo mezzi col fix GPS REALE e RECENTE: mai niente di datato o impossibile."""
+    now = time.time() if now is None else now
+    min_ts = now - MAX_GPS_AGE_SECONDS
+    max_ts = now + MAX_GPS_FUTURE_SECONDS
+    return [v for v in vehicles if min_ts <= (v.get("timestamp") or 0) <= max_ts]
+
+
+def _apply_fleet_hysteresis(fresh_vehicles: list) -> list:
     """Unisce le posizioni fresche con i mezzi visti di recente.
 
     - I mezzi presenti nel feed aggiornano posizione e orario di avvistamento.
     - I mezzi assenti da piu' della grazia escono (deposito reale o fine servizio).
-    - I mezzi assenti da poco restano con l'ultima posizione nota (GPS datato
-      viene gia' segnalato in UI tramite il loro vecchio timestamp).
+    - I mezzi assenti da poco restano con l'ultima posizione nota.
     - Se il feed intero salta un ciclo, la flotta resta visibile (nessun blackout).
-    - Se il feed e' INRAGGIUNGIBILE (feed_down), la grazia si estende a 10 min:
-      le ultime posizioni reali note restano sulla mappa, marcate come datate,
-      invece di svuotarla durante un outage GTT.
+    - La POLITICA DI FRESCHEZZA (_filter_fresh_positions, applicata a valle
+      dalla sync) decide cosa si mostra: solo fix GPS recenti, mai datato.
     """
     now = time.time()
-    grace = VEHICLE_OUTAGE_GRACE_SECONDS if feed_down else VEHICLE_GRACE_SECONDS
+    grace = VEHICLE_GRACE_SECONDS
     for v in fresh_vehicles:
         vid = v.get("vehicle_id")
         if vid:
@@ -303,10 +310,13 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
     # mai per un ciclo GPS perso del feed GTT.
     raw_vehicle_count = len(vehicles)
-    vehicles = _apply_fleet_hysteresis(
-        vehicles,
-        feed_down=(getattr(vehicles_scraper, "last_fetch_source", "") == "unavailable"),
-    )
+    vehicles = _apply_fleet_hysteresis(vehicles)
+    # POLITICA 'NIENTE DATATO' (richiesta esplicita): sulla mappa si mostra
+    # SOLO dove i mezzi sono adesso. Fix piu' vecchio di 2 minuti: non mostrato.
+    # Timestamp dal futuro (feed GTT corrotto, visto dal vivo): non mostrato.
+    # I mezzi tolti restano in memoria (isteresi): tornano appena riappare un
+    # fix fresco, senza attendere nuove uscite dal feed.
+    vehicles = _filter_fresh_positions(vehicles)
     if len(vehicles) != raw_vehicle_count:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")

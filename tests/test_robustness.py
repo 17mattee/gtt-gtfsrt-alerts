@@ -236,33 +236,23 @@ def test_raw_alerts_negative_cache_durante_outage(monkeypatch):
     gtfs_rt._raw_alerts_fail_at = 0.0
 
 
-def test_hysteresis_outage_mantiene_flotta():
-    """Feed posizioni IRraggiungibile: le ultime posizioni note restano 10 min."""
-    from app.gtt_full_sync import _apply_fleet_hysteresis, _recent_vehicles, VEHICLE_GRACE_SECONDS, VEHICLE_OUTAGE_GRACE_SECONDS
-    _recent_vehicles.clear()
-    _apply_fleet_hysteresis([{"vehicle_id": "9001U", "latitude": 45.0, "longitude": 7.6}])
+def test_niente_di_datato_in_mappa():
+    """Politica freschezza: mai fix vecchi (>2 min) o impossibili (dal futuro)."""
+    import time as _t
+    from app.gtt_full_sync import _filter_fresh_positions, MAX_GPS_AGE_SECONDS, MAX_GPS_FUTURE_SECONDS
 
-    # feed GIU' (unavailable): oltre la grazia normale i mezzi RESTANO
-    entry = _recent_vehicles["9001U"]
-    entry["seen_at"] -= VEHICLE_GRACE_SECONDS + 60  # ~3 min di silenzio feed
-    kept = _apply_fleet_hysteresis([], feed_down=True)
-    assert len(kept) == 1, "durante un outage l'ultima posizione nota resta visibile"
+    now = 1_000_000.0
+    fresco = {"vehicle_id": "A", "timestamp": now - 30}
+    datato = {"vehicle_id": "B", "timestamp": now - MAX_GPS_AGE_SECONDS - 1}     # 2 min e 1s fa
+    futuro = {"vehicle_id": "C", "timestamp": now + MAX_GPS_FUTURE_SECONDS + 1}  # timestamp corrotto
+    senza = {"vehicle_id": "D", "timestamp": None}
+    out = _filter_fresh_positions([fresco, datato, futuro, senza], now=now)
+    ids = {v["vehicle_id"] for v in out}
+    assert ids == {"A"}, f"solo il fix fresco deve restare, rimasti: {ids}"
 
-    # oltre i 10 minuti escono comunque: troppo vecchio per essere utile
-    entry["seen_at"] -= VEHICLE_OUTAGE_GRACE_SECONDS
-    kept = _apply_fleet_hysteresis([], feed_down=True)
-    assert kept == [], "oltre la grazia estesa il mezzo esce (dato troppo vecchio)"
-
-    # di notte il feed risponde (live) ma e' vuoto: grazia NORMALE, non estesa
-    _recent_vehicles.clear()
-    _apply_fleet_hysteresis([{"vehicle_id": "9001U"}])
-    entry = _recent_vehicles["9001U"]
-    entry["seen_at"] -= VEHICLE_GRACE_SECONDS + 60
-    kept = _apply_fleet_hysteresis([])  # feed_down=False
-    assert kept == [], "zero mezzi pubblicati col feed attivo e' un dato reale: il mezzo esce"
-    _recent_vehicles.clear()
-
-
+    # il limite esatto (2 min precisi) resta valido: e' l'eta' tollerata
+    limite = {"vehicle_id": "E", "timestamp": now - MAX_GPS_AGE_SECONDS}
+    assert _filter_fresh_positions([limite], now=now)[0]["vehicle_id"] == "E"
 def test_vehicles_negative_backoff_durante_outage(monkeypatch):
     """Feed posizioni giu': backoff di 30s, niente cascata di timeout a ogni ciclo."""
     import asyncio
