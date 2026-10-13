@@ -2,7 +2,7 @@ import os
 import logging
 import time
 import psycopg
-from datetime import datetime
+from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger("GTT-Database")
@@ -23,7 +23,9 @@ def save_alerts_to_db(alerts: list):
         with psycopg.connect(database_url, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 for alert in alerts:
-                    start_dt = datetime.fromtimestamp(alert["start_time"])
+                    # epoch -> datetime UTC esplicito: senza tz verrebbe interpretato col fuso
+                    # del server (UTC su Render), spostando lo storico di 1-2 ore.
+                    start_dt = datetime.fromtimestamp(alert["start_time"], tz=timezone.utc)
                     
                     cur.execute(
                         """

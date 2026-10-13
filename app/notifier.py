@@ -15,8 +15,11 @@ def send_telegram_alert(message: str):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": f"🚨 **GTT Alert Monitor**\n\n{message}",
-        "parse_mode": "Markdown"
+        # Testo semplice: con parse_mode Markdown un messaggio contenente
+        # caratteri come '_' o '[' (tipico nei messaggi d'errore con path
+        # o nomi host) veniva rifiutato da Telegram con 400 e la notifica
+        # non partiva MAI, in silenzio.
+        "text": f"[GTT Alert Monitor]\n\n{message}",
     }
     
     try:
