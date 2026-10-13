@@ -52,6 +52,14 @@ def _alerts_urls() -> list:
 last_trip_updates_source = "unknown"
 last_alerts_source = "unknown"
 
+# BUFFER RITARDI (feed GTT instabile, verificato dal vivo): a un fallimento
+# transitorio si servono i trip updates dell'ultimo fetch riuscito per al
+# massimo 60s (un ritardo di un minuto fa e' ancora attuale: la granularita'
+# dei ritardi e' il minuto). Oltre i 60s: 'n/d' onesto, mai dati vecchi.
+# Il flag resta 'cached': la UI lo dichiara, non lo spaccia per live.
+TRIP_UPDATES_STALE_TTL = 60
+_trip_updates_cache = {"data": None, "fetched_at": 0.0}
+
 # Cache del feed alerts: TTL breve per il super tempo reale, ma abbastanza
 # lungo da non sovraccaricare i server GTT con richieste inutili.
 ALERTS_CACHE_TTL = 20
@@ -360,8 +368,18 @@ async def fetch_gtt_trip_updates() -> list:
                 "timestamp": tu.timestamp or 0,
             })
         last_trip_updates_source = "live"
+        _trip_updates_cache["data"] = updates
+        _trip_updates_cache["fetched_at"] = time.time()
         print(f"🕐 [GTFS-RT] Trip Updates UFFICIALI GTT: {len(updates)} corse con stato di ritardo in tempo reale.")
     else:
+        # Fallimento transitorio: BUFFER (max 60s) con flag 'cached': la UI lo
+        # dichiara, non lo spaccia per live. Oltre i 60s: 'n/d' onesto.
+        cached = _trip_updates_cache["data"]
+        if cached and (time.time() - _trip_updates_cache["fetched_at"]) <= TRIP_UPDATES_STALE_TTL:
+            last_trip_updates_source = "cached"
+            print(f"🕐 [GTFS-RT] Feed Trip Updates non raggiungibile: servo {len(cached)} corse dal buffer "
+                  f"({int(time.time() - _trip_updates_cache['fetched_at'])}s, max {TRIP_UPDATES_STALE_TTL}s).")
+            return cached
         last_trip_updates_source = "unavailable"
         print("⚠️ [GTFS-RT] Feed Trip Updates ufficiale non raggiungibile in questo ciclo.")
 

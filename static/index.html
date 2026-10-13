@@ -578,6 +578,7 @@
             const unavailable = meta.vehicles_source === 'unavailable';
             const degraded = meta.positions_degraded;
             const delaysDown = meta.trip_updates_source === 'unavailable';
+            const delaysCached = meta.trip_updates_source === 'cached';
 
             document.getElementById('active-vehicles').innerText = vehicles.length;
             document.getElementById('active-alerts').innerText = alerts.length;
@@ -586,16 +587,17 @@
             document.getElementById('active-routes').innerText = Object.keys(routesCatalog).length;
             document.getElementById('last-update').innerText = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 
-            setLive(unavailable ? 'off' : degraded || delaysDown ? 'warn' : 'ok',
-                    unavailable ? 'OFFLINE' : degraded ? 'FEED DEGRADATO' : delaysDown ? 'RITARDI N/D' : 'LIVE');
+            setLive(unavailable ? 'off' : degraded || delaysDown || delaysCached ? 'warn' : 'ok',
+                    unavailable ? 'OFFLINE' : degraded ? 'FEED DEGRADATO' : delaysDown ? 'RITARDI N/D' : delaysCached ? 'RITARDI BUFFER' : 'LIVE');
 
             setStatus(
                 unavailable ? 'Feed posizioni GTT non raggiungibile: la mappa si repopola appena GTT riprende a trasmettere.'
                 : degraded ? 'GTT sta pubblicando pochi mezzi in questo momento (' + vehicles.length + '). Ritardi e avvisi restano live su ' + (meta.trip_vehicles || 0) + ' corse.'
                 : delaysDown ? 'Feed ritardi GTT non disponibile: i ritardi tornano appena GTT riprende a trasmetterli.'
+                : delaysCached ? 'Feed ritardi GTT instabile: serviti dal buffer degli ultimi 60 secondi.'
                 : live ? 'Dati ufficiali GTT in tempo reale · ' + vehicles.length + ' mezzi · ' + alerts.length + ' avvisi'
                 : 'In attesa dei feed GTT…',
-                !!(unavailable || degraded || delaysDown));
+                !!(unavailable || degraded || delaysDown || delaysCached));
 
             /* --- Mappa: con una linea selezionata si vedono SOLO i suoi mezzi ---
                I marker si RIUSANO tra i cicli SENZA MAI ricreare l'elemento

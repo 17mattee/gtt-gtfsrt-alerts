@@ -274,3 +274,42 @@ def test_vehicles_negative_backoff_durante_outage(monkeypatch):
     assert asyncio.run(vs.fetch_gtt_vehicle_positions()) == []
     assert vs._last_fail_at > 0
     vs._last_fail_at = 0.0
+
+
+def test_trip_updates_buffer_su_fallimento_transitorio(monkeypatch):
+    """Feed ritardi giu' per un ciclo: buffer 60s con flag 'cached', poi n/d."""
+    import asyncio
+    from google.transit import gtfs_realtime_pb2
+
+    def _feed():
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.header.gtfs_realtime_version = "2.0"
+        e = feed.entity.add()
+        e.id = "t1"
+        tu = e.trip_update
+        tu.trip.trip_id = "28379006U"
+        tu.stop_time_update.add().arrival.delay = 120
+        return feed
+
+    async def ok_fetch(url, timeout=8.0):
+        return _feed()
+
+    async def fail_fetch(url, timeout=8.0):
+        return None
+
+    monkeypatch.setattr(gtfs_rt, "_trip_update_urls", lambda: ["fake://tu"])
+    monkeypatch.setattr(gtfs_rt, "_fetch_feed", ok_fetch)
+    gtfs_rt._trip_updates_cache["data"] = None
+    gtfs_rt._trip_updates_cache["fetched_at"] = 0.0
+    prima = asyncio.run(gtfs_rt.fetch_gtt_trip_updates())
+    assert len(prima) == 1 and gtfs_rt.last_trip_updates_source == "live"
+
+    # feed giu' MA entro 60s: buffer servito, flag 'cached' (dichiarato, non 'live')
+    monkeypatch.setattr(gtfs_rt, "_fetch_feed", fail_fetch)
+    seconda = asyncio.run(gtfs_rt.fetch_gtt_trip_updates())
+    assert len(seconda) == 1 and gtfs_rt.last_trip_updates_source == "cached"
+
+    # oltre i 60s: n/d onesto, lista vuota
+    gtfs_rt._trip_updates_cache["fetched_at"] -= gtfs_rt.TRIP_UPDATES_STALE_TTL + 1
+    terza = asyncio.run(gtfs_rt.fetch_gtt_trip_updates())
+    assert terza == [] and gtfs_rt.last_trip_updates_source == "unavailable"
