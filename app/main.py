@@ -188,6 +188,16 @@ async def health_check():
     }
 
 
+def _client_ip(request: Request) -> str:
+    """IP reale del client: dietro il proxy di Render, request.client.host e'
+    l'IP del load balancer (uguale per TUTTI gli utenti): senza X-Forwarded-For
+    il rate limit diventerebbe collettivo e throttlerebbe utenti legittimi."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @app.get("/gtfs-rt/alerts.pb")
 async def gtfs_rt_alerts_feed(request: Request):
     """Feed GTFS-Realtime (Service Alerts) in formato Protocol Buffers standard.
@@ -196,8 +206,7 @@ async def gtfs_rt_alerts_feed(request: Request):
     altrimenti ricostruisce il feed dallo snapshot locale.
     Con rate limit per non far abusare dei feed GTT tramite il nostro proxy.
     """
-    client_ip = request.client.host if request.client else "unknown"
-    if _rate_limited(client_ip):
+    if _rate_limited(_client_ip(request)):
         return Response(status_code=429, content=b"Too Many Requests")
     try:
         from app.gtfs_rt import fetch_raw_alerts_feed
@@ -219,8 +228,11 @@ async def gtfs_rt_alerts_feed(request: Request):
         entity = feed.entity.add()
         entity.id = str(alert.get("alert_id", "gtt-alert"))
         informed = entity.alert.informed_entity
+        # Contratto GTFS-RT: informed_entity.route_id deve riferirsi al
+        # route_id di routes.txt (es. '2U'), non al nome linea visibile ('2').
+        from app.gtfs_static import gtfs_manager
         for route_id in alert.get("affected_routes", []):
-            informed.add().route_id = str(route_id)
+            informed.add().route_id = str(gtfs_manager.get_gtfs_route_id(route_id) or route_id)
         entity.alert.header_text.translation.add(
             language="it", text=str(alert.get("header", "Avviso di servizio GTT"))
         )

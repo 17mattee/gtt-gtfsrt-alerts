@@ -166,3 +166,50 @@ def test_titolo_avviso_non_solo_data():
     assert t1.startswith("13/10/2026")
     t2 = scraper._title_from_text("Linee 4 e 15 deviate causa lavori. Dettagli nel sito.")
     assert t2 == "Linee 4 e 15 deviate causa lavori"
+
+
+def test_avvisi_scraper_stessa_forma_del_feed_rt():
+    """Gli avvisi di fallback hanno gli stessi tipi e chiavi del feed ufficiale."""
+    import time as _time
+    from app.gtt_full_sync import _map_scraped_alert
+    from app import gtfs_rt
+
+    raw = {"id": "x1", "title": "Linee 4, 15 deviate", "description": "testo",
+           "route_ids": ["4", "15"], "cause": 10, "effect": 4, "start_time": 1790000000}
+    alert = _map_scraped_alert(raw, 0)
+    # stessi TIPI del feed RT: cause/effect int, non stringhe
+    assert isinstance(alert["cause"], int) and alert["cause"] == 10
+    assert isinstance(alert["effect"], int) and alert["effect"] == 4
+    # category aggregata: le deviazioni del fallback devono essere riconosciute
+    assert alert["category"] == "deviazione"
+    assert alert["cause_label"] == gtfs_rt.CAUSE_LABELS[10]
+    assert alert["effect_label"] == gtfs_rt.EFFECT_LABELS[4]
+
+
+def test_mappa_inversa_route_id_gtfs():
+    """'2' -> '2U': il feed GTFS-RT ricostruito deve usare i route_id di routes.txt."""
+    import time as _time
+    from app.gtfs_static import gtfs_manager
+
+    orig_map, orig_cache, orig_loaded = gtfs_manager._route_id_map, gtfs_manager._routes_cache, gtfs_manager._cache_loaded_at
+    try:
+        gtfs_manager._route_id_map = {"2U": "2", "METROU": "M1"}
+        gtfs_manager._routes_cache = {"2": "x", "M1": "y"}
+        gtfs_manager._cache_loaded_at = _time.time()
+        assert gtfs_manager.get_gtfs_route_id("2") == "2U"
+        assert gtfs_manager.get_gtfs_route_id("M1") == "METROU"
+        # linea ignota: restituita invariata, mai None
+        assert gtfs_manager.get_gtfs_route_id("99") == "99"
+    finally:
+        gtfs_manager._route_id_map, gtfs_manager._routes_cache, gtfs_manager._cache_loaded_at = orig_map, orig_cache, orig_loaded
+
+
+def test_client_ip_dietro_proxy():
+    """Il rate limit deve distinguere gli utenti reali (X-Forwarded-For), non l'IP del LB."""
+    from starlette.requests import Request
+    from app.main import _client_ip
+
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", b"203.0.113.9, 10.0.0.1")], "client": ("10.20.30.40", 50000)}
+    assert _client_ip(Request(scope)) == "203.0.113.9"
+    scope_senza_xff = {"type": "http", "headers": [], "client": ("10.20.30.40", 50000)}
+    assert _client_ip(Request(scope_senza_xff)) == "10.20.30.40"

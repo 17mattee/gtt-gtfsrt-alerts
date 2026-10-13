@@ -149,15 +149,32 @@ DEFAULT_ALERT = {
 
 
 def _map_scraped_alert(raw: dict, idx: int) -> dict:
-    """Converte un avviso dello scraper GTT nel formato consumato dalla Control Room."""
+    """Converte un avviso dello scraper GTT nel formato consumato dalla Control Room.
+
+    Stessa FORMA del feed GTFS-RT ufficiale (stessi tipi e stesse chiavi):
+    cause/effect int, label italiani e category aggregata — cosi' le
+    deviazioni del fallback vengono elaborate dal parser e mostrate con il
+    badge giusto, esattamente come quelle del feed ufficiale.
+    """
     route_ids = raw.get("route_ids") or []
+    try:
+        cause = int(raw.get("cause") or 1)
+    except (TypeError, ValueError):
+        cause = 1
+    try:
+        effect = int(raw.get("effect") or 8)
+    except (TypeError, ValueError):
+        effect = 8
     return {
         "alert_id": raw.get("id") or f"gtt_alert_{idx}",
         "header": raw.get("title") or "Avviso di servizio GTT",
         "description": raw.get("description", ""),
         "affected_routes": route_ids,
-        "cause": str(raw.get("cause", "")),
-        "effect": str(raw.get("effect", "")),
+        "cause": cause,
+        "effect": effect,
+        "cause_label": gtfs_rt.CAUSE_LABELS.get(cause, "Causa non specificata"),
+        "effect_label": gtfs_rt.EFFECT_LABELS.get(effect, "Effetto non specificato"),
+        "category": gtfs_rt.CATEGORY_BY_EFFECT.get(effect) or "informazione",
         "start_time": raw.get("start_time"),
     }
 
@@ -451,6 +468,11 @@ async def _fetch_all_gtt_data_inner() -> dict:
             from app.scraper import fetch_gtt_alerts
             scraped = await asyncio.to_thread(fetch_gtt_alerts)
             alerts = [_map_scraped_alert(a, i) for i, a in enumerate(scraped)]
+            # Stessa elaborazione del feed RT: le deviazioni del portale
+            # diventano dati strutturati (periodo, vie, ritorno), non solo testo.
+            for a in alerts:
+                if a.get("category") == "deviazione":
+                    a["detour"] = gtfs_rt._parse_detour_details(a.get("header", ""), a.get("description") or "")
             print(f"📢 [SYNC] FASE 3 (portale GTT) -> Avvisi estratti dal portale: {len(alerts)}.")
         except Exception as exc:
             logger.warning("Scraper avvisi non disponibile (%s).", exc)

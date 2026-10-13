@@ -161,6 +161,20 @@ class GtfsStaticManager:
             return self._route_id_map[rid]
         return rid
 
+    def get_gtfs_route_id(self, short_name: str) -> str:
+        """Nome linea visibile (es. '2') -> route_id GTFS (es. '2U').
+
+        Inverso di get_route_short_name: serve per i feed GTFS-RT, dove
+        informed_entity.route_id deve riferirsi al route_id di routes.txt.
+        Restituisce il nome linea invariato se non mappabile (mai None).
+        """
+        target = str(short_name or "").strip()
+        if target and self._is_cache_fresh():
+            for route_id, short in self._route_id_map.items():
+                if short == target:
+                    return route_id
+        return target
+
     def get_route_types(self) -> dict:
         """Tipo di mezzo per linea dai dati UFFICIALI GTT (route_type GTFS).
 
