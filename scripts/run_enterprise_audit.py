@@ -49,8 +49,11 @@ async def run_comprehensive_audit():
         assert isinstance(vehicles, list)
         if len(vehicles) == 0:
             print("  ℹ️ GTT non pubblica posizioni ora: nessun mezzo simulato.")
-        sample = vehicles[0] if vehicles else {"vehicle_id": "n/d", "route_id": "n/d", "latitude": 0, "longitude": 0}
-        print(f"     Esempio mezzo -> ID: {sample.get('vehicle_id')} | Linea: {sample.get('route_id')} | Pos: ({sample.get('latitude')}, {sample.get('longitude')})")
+        # Nessun dettaglio GPS/ID stampato: CodeQL segnala il logging in
+        # chiaro di dati di posizione come "sensitive" (alert n.2). Per
+        # l'audit basta l'informazione aggregata, gia' stampata sopra.
+        sample_count = len({v.get("route_id") for v in vehicles}) if vehicles else 0
+        print(f"     Campione: {len(vehicles)} mezzi su {sample_count} linee distanti.")
     except Exception as e:
         err_msg = f"Fallimento test Vehicle Scraper: {e}"
         print(f"  ❌ {err_msg}")
