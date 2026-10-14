@@ -157,8 +157,17 @@ class GtfsStaticManager:
         rid = str(route_id or "").strip()
         if not rid:
             return rid
-        if self._is_cache_fresh() and rid in self._route_id_map:
+        # La mappa resta valida anche a catalogo STALE (le linee cambiano
+        # raramente, stessa politica del refresh: mai un crollo al fallback
+        # solo perche' e' scaduto il TTL di un'ora).
+        if rid in self._route_id_map:
             return self._route_id_map[rid]
+        # Fallback fuori catalogo (GTT-Static assente, outage verificato dal
+        # vivo): i route_id urbani GTT terminano con 'U' (es. '2U' e' la
+        # linea 2). Senza questa normalizzazione la mappa mostrerebbe '2U'
+        # e chi cerca la linea '2' non troverebbe il suo mezzo.
+        if rid.endswith("U") and (rid[:-1] in FALLBACK_ROUTES or rid[:-1] in self._routes_cache):
+            return rid[:-1]
         return rid
 
     def get_gtfs_route_id(self, short_name: str) -> str:

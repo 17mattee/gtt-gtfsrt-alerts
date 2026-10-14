@@ -564,7 +564,7 @@
             html += '<div class="popup-row">' + (v.verifica === 'doppia_fonte'
                 ? 'Presenza confermata da GPS e orari di corsa (doppia fonte)'
                 : 'Tracciato dal solo GPS (corsa non nel feed orari)') + '</div>';
-            html += '<div class="popup-row">Corsa ' + esc(v.trip_id) + '</div>';
+            html += '<div class="popup-row">Corsa ' + esc(v.trip_id || 'n/d') + '</div>';
             if (v.next_stop) {
                 const eta = etaMinutes(v.next_stop);
                 html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">Prossima fermata: ' + esc(v.next_stop.name) + (eta != null ? (eta > 0 ? ' · tra ' + eta + ' min' : ' · in arrivo') : '') + '</div>';

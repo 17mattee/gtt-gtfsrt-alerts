@@ -110,6 +110,7 @@ async def fetch_gtt_vehicle_positions() -> list:
         last_fetch_source = "unavailable"
         return []
     vehicles = []
+    valid_but_empty = False
     print("🔍 [SCRAPER] Avvio telemetria flotta GTT (GTFS-RT Vehicle Positions)...")
 
     for url in _vehicle_endpoints():
@@ -173,14 +174,26 @@ async def fetch_gtt_vehicle_positions() -> list:
                     _previous_positions.pop(stale, None)
                 with_speed = sum(1 for v in vehicles if v.get("speed") is not None)
                 print(f"✅ [SCRAPER] Feed UFFICIALE GTT: {len(vehicles)} mezzi reali pubblicati e tracciati (velocita' reale calcolata per {with_speed}).")
-            else:
-                print("⚠️ [SCRAPER] Feed GTT raggiungibile ma nessun veicolo pubblicato in questo istante: mostro zero mezzi (dato reale).")
-            return vehicles
+                return vehicles
+            # Feed VALIDO ma VUOTO: puo' essere un endpoint degradato (che
+            # risponde ma non e' quello giusto) oppure GTT che in questo
+            # istante non pubblica mezzi. NON si accetta lo zero dal primo
+            # endpoint: si prova il successivo, cosi' un endpoint rotto non
+            # puo' mascherare la flotta pubblicata su un altro.
+            valid_but_empty = True
+            vehicles = []
+            print(f"⚠️ [SCRAPER] {url} ha risposto un feed valido ma senza veicoli: provo l'endpoint successivo.")
+            continue
 
         except Exception as exc:
             print(f"⚠️ [SCRAPER] Endpoint {url} non raggiungibile: {exc}")
             continue
 
+    # Tutti gli endpoint validi sono vuoti: GTT pubblica davvero zero mezzi
+    # in questo istante (dato reale mostrato come tale, fonte 'live').
+    if valid_but_empty:
+        print("⚠️ [SCRAPER] Feed GTT raggiungibile ma nessun veicolo pubblicato in questo istante: mostro zero mezzi (dato reale).")
+        return []
     # Nessun endpoint raggiungibile: lista vuota, MAI mezzi inventati.
     last_fetch_source = "unavailable"
     _last_fail_at = time.time()
