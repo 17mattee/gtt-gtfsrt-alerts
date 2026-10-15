@@ -183,8 +183,13 @@ async def fetch_gtt_vehicle_positions() -> list:
                     if not (TURIN_BBOX["lon_min"] <= lon <= TURIN_BBOX["lon_max"]):
                         continue
                     route_id = v.trip.route_id if v.HasField("trip") else ""
+                    # ID univoco DI FALLBACK: l'ID mancante NON deve collassare
+                    # tutti i mezzi anonimi in un solo "GTT-BUS" (sarebbe un
+                    # mezzo invece di N). Si usa l'id dell'entita' del feed o,
+                    # in ultima istanza, un progressivo del ciclo.
+                    fallback_id = f"GTT-VEH-{entity.id}" if entity.id else f"GTT-VEH-{len(vehicles)}"
                     vehicle = {
-                        "vehicle_id": v.vehicle.id or "GTT-BUS",
+                        "vehicle_id": v.vehicle.id or fallback_id,
                         "trip_id": v.trip.trip_id if v.HasField("trip") else "N/A",
                         # route_id GTFS (es. "2U") tradotto nel nome linea reale (es. "2")
                         "route_id": gtfs_manager.get_route_short_name(route_id) or "N/A",
@@ -200,14 +205,15 @@ async def fetch_gtt_vehicle_positions() -> list:
                     vehicle["speed"] = computed if computed is not None else feed_speed
                     vehicles.append(vehicle)
 
-            # Difensivo: se il feed pubblicasse lo stesso mezzo due volte, si deduplica.
-            seen_ids = set()
-            deduped = []
+            # Difensivo: se il feed pubblicasse lo stesso mezzo due volte, si
+            # deduplica tenendo il fix PIU' RECENTE (il primo esemplare
+            # potrebbe essere la posizione del ciclo precedente).
+            latest: dict = {}
             for v in vehicles:
-                if v["vehicle_id"] not in seen_ids:
-                    seen_ids.add(v["vehicle_id"])
-                    deduped.append(v)
-            vehicles = deduped
+                vid = v["vehicle_id"]
+                if vid not in latest or (v.get("timestamp") or 0) > (latest[vid].get("timestamp") or 0):
+                    latest[vid] = v
+            vehicles = list(latest.values())
 
             # Feed raggiunto: mostra ESATTAMENTE quello che GTT pubblica,
             # anche se in questo momento sono pochissimi mezzi.
