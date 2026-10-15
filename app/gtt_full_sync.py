@@ -421,7 +421,6 @@ async def _fetch_all_gtt_data_inner() -> dict:
     stops_catalog = gtfs_manager.get_stops()
     headsigns = gtfs_manager.get_trip_headsigns()
     trip_routes = gtfs_manager.get_trip_routes()
-    from app.vehicles_scraper import _haversine_meters
 
     def _terminus_name(stop_id):
         """Nome pulito del capolinea: 'Fermata 163 - CORRADINO CAP' -> 'CORRADINO CAP'."""
@@ -483,14 +482,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
     if derived_count:
         # delay_by_trip cattura i valori: si ricostruisce dopo la derivazione.
         delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
-        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senzo campo delay nel feed).")
-
-    # VERIFICA DOPPIA FONTE: un mezzo mostrato esiste perche' ha un fix GPS REALE
-    # fresco (filtro 'niente datato'). La conferma incrociata col feed corse
-    # (stesso vehicle_id o stessa corsa) attesta che e' davvero IN SERVIZIO su
-    # una corsa tracciata dagli orari: verificato da due fonti indipendenti GTT.
-    vehicles_in_tu = {t.get("vehicle_id") for t in trip_updates if t.get("vehicle_id")}
-    trips_in_tu = {t.get("trip_id") for t in trip_updates if t.get("trip_id")}
+        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senza campo delay nel feed).")
 
     for v in vehicles:
         v["verifica"] = ("doppia_fonte"
