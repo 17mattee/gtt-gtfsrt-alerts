@@ -343,6 +343,13 @@
                 .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
+        // Link esterni (RSS): esc() previene l'uscita dall'attributo, ma NON
+        // basta contro gli scheme pericolosi (javascript:) se la fonte fosse
+        // compromessa: si accettano solo http/https.
+        function safeLink(url) {
+            return /^https?:\/\//i.test(String(url || '')) ? String(url) : '#';
+        }
+
         /* ---------- Tipi e colori: SOLO dati ufficiali GTT ---------- */
         function typeOf(routeId) {
             const r = String(routeId || '');
@@ -880,7 +887,7 @@
                         html += ' · linee GTT interessate: ' + n.linee_gtt_attive.map(esc).join(', ');
                     }
                     html += '</div>';
-                    if (n.link) html += '<div class="alert-meta"><a href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-weight:600;">Leggi la notizia completa</a></div>';
+                    if (n.link) html += '<div class="alert-meta"><a href="' + esc(safeLink(n.link)) + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-weight:600;">Leggi la notizia completa</a></div>';
                     html += '</div>';
                 });
             } else {
