@@ -46,6 +46,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _epoch_to_iso(value) -> str | None:
+    """epoch -> ISO 8601 UTC; None se assente o non numerico (mai eccezioni)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
+
+
 def _batched(seq, size=500):
     """Supabase accetta batch limitati: suddividiamo gli insert grandi."""
     for i in range(0, len(seq), size):
@@ -138,7 +148,7 @@ async def save_network_data_to_db(data: dict):
                     "cause": al.get("cause_label") or str(al.get("cause") or ""),
                     "effect": al.get("effect_label") or str(al.get("effect") or ""),
                     "category": al.get("category") or "informazione",
-                    "start_time": datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat() if start_time else None,
+                    "start_time": _epoch_to_iso(start_time),
                 })
             for batch in _batched(rows, 200):
                 supabase.table("gtt_alerts_history").upsert(batch, on_conflict="alert_id").execute()
