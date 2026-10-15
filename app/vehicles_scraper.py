@@ -9,6 +9,7 @@ Caratteristiche:
 - La velocita' non e' trasmessa da GTT: viene calcolata dagli spostamenti GPS reali.
 """
 
+import asyncio
 import logging
 import math
 import time
@@ -103,7 +104,7 @@ async def fetch_gtt_vehicle_positions() -> list:
     la Control Room mostra la verita', mai mezzi inventati.
     Durante un outage la cascata non viene ritentata per VEHICLES_FAIL_TTL
     (backoff): l'isteresi di gtt_full_sync mantiene la flotta in ultima
-    posizione nota, marcatata come datata.
+    posizione nota, marcata come datata.
     """
     global last_fetch_source, _last_fail_at
     if _last_fail_at and (time.time() - _last_fail_at) < VEHICLES_FAIL_TTL:
@@ -113,7 +114,12 @@ async def fetch_gtt_vehicle_positions() -> list:
     valid_but_empty = False
     print("🔍 [SCRAPER] Avvio telemetria flotta GTT (GTFS-RT Vehicle Positions)...")
 
-    for url in _vehicle_endpoints():
+    # La scoperta degli URL usa httpx SINCRONO in cache: a scadenza TTL la
+    # chiamata gira in un thread dedicato per non bloccare l'event loop
+    # (refresher + WebSocket) per l'intero timeout HTTP.
+    urls = await asyncio.to_thread(_vehicle_endpoints)
+
+    for url in urls:
         try:
             async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
                 response = await client.get(url)

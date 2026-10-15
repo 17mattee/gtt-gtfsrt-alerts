@@ -10,6 +10,7 @@ Ogni funzione e' asincrona, non bloccante e non solleva MAI eccezioni:
 in caso di feed non raggiungibile restituisce una struttura vuota.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -292,7 +293,8 @@ async def fetch_raw_alerts_feed() -> bytes:
         return cached
     if _raw_alerts_fail_at and (time.time() - _raw_alerts_fail_at) < RAW_ALERTS_FAIL_TTL:
         return b""
-    for url in _alerts_urls():
+    # httpx sincrono del catalogo in cache: in thread, mai nell'event loop.
+    for url in await asyncio.to_thread(_alerts_urls):
         try:
             async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
                 response = await client.get(url)
@@ -312,7 +314,8 @@ async def fetch_gtt_trip_updates() -> list:
     global last_trip_updates_source
     updates = []
     feed = None
-    for url in _trip_update_urls():
+    # httpx sincrono del catalogo in cache: in thread, mai nell'event loop.
+    for url in await asyncio.to_thread(_trip_update_urls):
         feed = await _fetch_feed(url)
         if feed is not None:
             break
@@ -400,7 +403,8 @@ async def fetch_gtt_rt_alerts() -> list:
 
     alerts = []
     feed = None
-    for url in _alerts_urls():
+    # httpx sincrono del catalogo in cache: in thread, mai nell'event loop.
+    for url in await asyncio.to_thread(_alerts_urls):
         feed = await _fetch_feed(url)
         if feed is not None:
             break
