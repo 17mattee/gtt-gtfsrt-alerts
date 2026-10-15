@@ -369,6 +369,10 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
     # mai per un ciclo GPS perso del feed GTT.
     raw_vehicle_count = len(vehicles)
+    # Un fix DATATO pubblicato dal feed NON deve rinfrescare il timer di grazia:
+    # un mezzo che pubblica solo posizioni vecchie resta in memoria per la
+    # grazia e poi esce, invece di esservi trattenuto per sempre.
+    vehicles = _filter_fresh_positions(vehicles)
     vehicles = _apply_fleet_hysteresis(vehicles)
     # POLITICA 'NIENTE DATATO' (richiesta esplicita): sulla mappa si mostra
     # SOLO dove i mezzi sono adesso. Fix piu' vecchio di 2 minuti: non mostrato.
