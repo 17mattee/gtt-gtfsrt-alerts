@@ -6,4 +6,8 @@ services:
     environment:
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
     restart: always
