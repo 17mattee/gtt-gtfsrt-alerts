@@ -9,9 +9,11 @@ Garanzie:
 """
 
 import asyncio
+import json
 import re
 import logging
 import time
+from pathlib import Path
 
 from app import gtfs_rt
 from app import vehicles_scraper
@@ -32,6 +34,26 @@ network_snapshot: dict = {
 
 _last_sequence_refresh = 0.0
 SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
+
+# ----------------------------------------------------------------------------
+# INDIPENDENZA DAI CRASH DEI FEED GTT (outage multipli al giorno, verificati
+# dal vivo: feed posizioni giu' mentre i trip updates restano attivi).
+# Due difese complementari, entrambe con dati REALI dichiarati 'cached':
+# 1) BUFFER OUTAGE (memoria): feed posizioni giu' -> si serve l'ultima flotta
+#    reale nota entro questo TTL. La UI marca ogni fix 'GPS datato' e la
+#    sorgente 'FLOTTA BUFFER'. Oltre il TTL: flotta vuota onesta, mai finzione.
+# 2) SNAPSHOT SU DISCO: l'ultimo sync buono sopravvive ai riavvi del processo
+#    (deploi, crash del worker): il cold start parte con i dati reali invece
+#    che a zero. File atomico (write + rename), mai bloccante, mai fatale.
+# ----------------------------------------------------------------------------
+OUTAGE_FLEET_TTL_S = 600
+SNAPSHOT_MAX_AGE_S = 900
+SNAPSHOT_WRITE_INTERVAL_S = 30
+_SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "gtfs_data"
+_SNAPSHOT_FILE = _SNAPSHOT_DIR / "last_good_snapshot.json"
+_last_good_fleet: list = []
+_last_good_fleet_at: float = 0.0
+_last_snapshot_write_at: float = 0.0
 
 # ISTERESI FLOTTA: il feed posizioni GTT fa "lampeggiare" i mezzi — un mezzo
 # puo' sparire per uno-due cicli GPS (20-60s) e tornare, facendo oscillare il
@@ -305,6 +327,33 @@ def _map_scraped_alert(raw: dict, idx: int) -> dict:
     }
 
 
+def _serve_outage_fleet(vehicles: list) -> tuple:
+    """Feed posizioni GIU': serve l'ultima flotta reale nota, marcata 'cached'.
+
+    Ritorna (flotta, dal_buffer). Nessuna finzione: oltre il TTL la flotta e'
+    vuota con sorgente 'unavailable' (dato reale), e i mezzi serviti dal
+    buffer restano i loro fix GPS originali: la UI li marca 'GPS datato'.
+    """
+    if vehicles or getattr(vehicles_scraper, "last_fetch_source", "") != "unavailable":
+        return vehicles, False
+    now = time.time()
+    if _last_good_fleet and (now - _last_good_fleet_at) <= OUTAGE_FLEET_TTL_S:
+        age = int(now - _last_good_fleet_at)
+        print(f"🔌 [SYNC] Feed posizioni GTT offline: servo l'ultima flotta reale nota "
+              f"({len(_last_good_fleet)} mezzi di {age}s fa, max {OUTAGE_FLEET_TTL_S}s), marcata 'cached'.")
+        return [dict(v) for v in _last_good_fleet], True
+    return vehicles, False
+
+
+def _remember_good_fleet(vehicles: list, from_buffer: bool) -> None:
+    """Memoria dell'ultima flotta REALE vista dal feed (base del buffer outage)."""
+    global _last_good_fleet, _last_good_fleet_at
+    if from_buffer or not vehicles:
+        return
+    _last_good_fleet = [dict(v) for v in vehicles]
+    _last_good_fleet_at = time.time()
+
+
 def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
     """Linea di ogni corsa: prima il feed posizioni, poi il GTFS-Static.
 
@@ -337,6 +386,57 @@ def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
             tu["route_id"] = resolved
     if resolved_static:
         print(f"🗺️ [SYNC] Linea risolta dal GTFS-Static per {resolved_static} corse (feed posizioni assente o degradato).")
+
+
+def _save_snapshot_to_disk(result: dict) -> None:
+    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale."""
+    global _last_snapshot_write_at
+    now = time.time()
+    if now - _last_snapshot_write_at < SNAPSHOT_WRITE_INTERVAL_S:
+        return
+    if not result.get("vehicles"):
+        return  # uno snapshot vuoto non serve a nessun cold start
+    _last_snapshot_write_at = now
+    payload = {"saved_at": now, "data": result}
+    try:
+        _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _SNAPSHOT_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(_SNAPSHOT_FILE)  # scrittura atomica: mai uno snapshot a meta'
+    except Exception as exc:
+        logger.warning("Snapshot su disco non salvabile (%s): continuo senza.", exc)
+
+
+def load_last_good_snapshot() -> bool:
+    """Cold start: ripristina l'ultimo snapshot buono se abbastanza fresco.
+
+    Seeda lo snapshot globale (la UI parte con dati reali mentre il primo sync
+    live gira in background) e il buffer outage. Le sorgenti nel meta vengono
+    dichiarate 'cached': nessun dato ripristinato si spaccia per live.
+    """
+    global _last_good_fleet, _last_good_fleet_at
+    try:
+        if not _SNAPSHOT_FILE.exists():
+            return False
+        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        saved_at = float(payload.get("saved_at") or 0)
+        data = payload.get("data") or {}
+        if not data.get("vehicles") or (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
+            return False
+        meta = dict(data.get("meta") or {})
+        for key in ("vehicles_source", "alerts_source", "trip_updates_source"):
+            if meta.get(key):
+                meta[key] = "cached"
+        data["meta"] = meta
+        network_snapshot.update(data)
+        _last_good_fleet = [dict(v) for v in data["vehicles"]]
+        _last_good_fleet_at = saved_at
+        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono "
+              f"({len(data['vehicles'])} mezzi di {int(time.time() - saved_at)}s fa, sorgente 'cached').")
+        return True
+    except Exception as exc:
+        logger.warning("Snapshot su disco non leggibile (%s): cold start normale.", exc)
+        return False
 
 
 async def _fetch_all_gtt_data_inner() -> dict:
@@ -417,6 +517,11 @@ async def _fetch_all_gtt_data_inner() -> dict:
     if len(vehicles) != raw_vehicle_count:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
+
+    # BUFFER OUTAGE: feed posizioni giu' -> ultima flotta reale nota ('cached')
+    vehicles, fleet_from_buffer = _serve_outage_fleet(vehicles)
+    # La flotta appena vista dal feed alimenta la memoria del buffer outage.
+    _remember_good_fleet(vehicles, fleet_from_buffer)
 
     # Il feed trip_update di GTT non contiene mai route_id: si risolve la
     # linea incrociando il feed posizioni e, come fonte indipendente, il
@@ -677,7 +782,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
 
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates
-    print(f"🚌 [SYNC] FASE 2 OK -> Flotta tracciata: {len(vehicles)} mezzi ({getattr(vehicles_scraper, 'last_fetch_source', '?')}).")
+    print(f"🚌 [SYNC] FASE 2 OK -> Flotta tracciata: {len(vehicles)} mezzi ({'cached' if fleet_from_buffer else getattr(vehicles_scraper, 'last_fetch_source', '?')}).")
     print(f"🕐 [SYNC] FASE 4 OK -> Trip Updates: {len(trip_updates)} corse monitorate ({getattr(gtfs_rt, 'last_trip_updates_source', '?')}).")
 
     # FASE 3: allerte ufficiali GTFS-RT; in cascata feed ufficiale -> scraper portale -> default.
@@ -745,7 +850,9 @@ async def _fetch_all_gtt_data_inner() -> dict:
     result["route_text_colors"] = gtfs_manager.get_route_text_colors()
 
     # FASE 5: Metadati e aggiornamento snapshot globale.
-    vehicles_source = getattr(vehicles_scraper, "last_fetch_source", "unknown")
+    # 'cached' quando la flotta viene dal buffer outage: la UI lo dichiara
+    # (badge FLOTTA BUFFER + fix GPS marcati 'datati'), mai spacciato per live.
+    vehicles_source = "cached" if fleet_from_buffer else getattr(vehicles_scraper, "last_fetch_source", "unknown")
     alerts_source = getattr(gtfs_rt, "last_alerts_source", "unknown")
     trip_updates_source = getattr(gtfs_rt, "last_trip_updates_source", "unknown")
     result["meta"] = {
@@ -766,6 +873,9 @@ async def _fetch_all_gtt_data_inner() -> dict:
         network_snapshot.update(result)
     except Exception:
         pass
+
+    # SNAPSHOT SU DISCO (anti-crash GTT/worker): throttled e mai bloccante.
+    await asyncio.to_thread(_save_snapshot_to_disk, result)
 
     print(f"✅ [SYNC] Sincronizzazione completata -> {len(result['vehicles'])} mezzi, {len(alerts)} avvisi, {len(result['routes_catalog'])} linee.\n")
     return result

@@ -16,7 +16,11 @@ RUN apt-get update \
 COPY . .
 
 # Il container NON gira come root: un eventuale exploit ha permessi minimi.
-RUN useradd --create-home --uid 10001 gtt
+# /app/gtfs_data e' la cache dell'ultimo sync buono (anti-crash GTT): scrivibile
+# dall'utente del servizio.
+RUN useradd --create-home --uid 10001 gtt \
+    && mkdir -p /app/gtfs_data \
+    && chown -R gtt:gtt /app/gtfs_data
 USER gtt
 
 EXPOSE 8000

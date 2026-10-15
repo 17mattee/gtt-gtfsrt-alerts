@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.transit import gtfs_realtime_pb2
 
-from app.gtt_full_sync import fetch_all_gtt_data, get_network_snapshot
+from app.gtt_full_sync import fetch_all_gtt_data, get_network_snapshot, load_last_good_snapshot
 from app.websocket_manager import manager
 
 logging.basicConfig(
@@ -95,6 +95,9 @@ async def _background_refresher() -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Anti-crash GTT: se il processo riparte mentre i feed sono giu', il cold
+    # start parte con l'ultimo snapshot buono dal disco invece che a zero.
+    await asyncio.to_thread(load_last_good_snapshot)
     refresher = asyncio.create_task(_background_refresher())
     logger.info("🚀 Avvio GTT Enterprise Middleware: refresher real-time attivo.")
     yield

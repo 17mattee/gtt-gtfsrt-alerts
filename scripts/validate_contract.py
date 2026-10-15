@@ -29,7 +29,7 @@ from google.transit import gtfs_realtime_pb2
 
 KNOWN_CATEGORIES = {"deviazione", "interruzione", "fermata_spostata", "ritardo",
                      "servizio_ridotto", "potenziamento", "accessibilita", "informazione"}
-KNOWN_SOURCES = {"live", "unavailable", "unknown"}
+KNOWN_SOURCES = {"live", "cached", "unavailable", "unknown"}
 
 _results = []
 
