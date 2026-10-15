@@ -305,6 +305,40 @@ def _map_scraped_alert(raw: dict, idx: int) -> dict:
     }
 
 
+def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
+    """Linea di ogni corsa: prima il feed posizioni, poi il GTFS-Static.
+
+    Il feed trip_update di GTT non contiene MAI route_id (verificato dal
+    vivo: 464/464 corse con route_id vuoto). La risoluzione incrociata col
+    feed posizioni funziona solo quando quel feed e' attivo: durante i suoi
+    crash (frequenti su GTT) TUTTE le corse restavano 'N/A' e intere linee
+    sparivano dalla lista ritardi. Il GTFS-Static ufficiale (trips.txt,
+    verificato: 100% dei trip_id del feed presente) risolve la linea in modo
+    indipendente dai feed real-time.
+    """
+    vehicle_trip_routes = {v["trip_id"]: v["route_id"] for v in vehicles if v.get("trip_id") and v.get("route_id")}
+    vehicle_id_routes = {v["vehicle_id"]: v["route_id"] for v in vehicles if v.get("vehicle_id") and v.get("route_id")}
+    trip_routes_static = gtfs_manager.get_trip_routes()
+    resolved_static = 0
+    for tu in trip_updates:
+        if tu.get("route_id") and tu["route_id"] != "N/A":
+            continue
+        resolved = None
+        if tu.get("vehicle_id"):
+            resolved = vehicle_id_routes.get(tu["vehicle_id"])
+        if not resolved and tu.get("trip_id"):
+            resolved = vehicle_trip_routes.get(tu["trip_id"])
+        if not resolved and tu.get("trip_id"):
+            static_short = gtfs_manager.get_route_short_name(trip_routes_static.get(tu["trip_id"]) or "")
+            if static_short:
+                resolved = static_short
+                resolved_static += 1
+        if resolved:
+            tu["route_id"] = resolved
+    if resolved_static:
+        print(f"🗺️ [SYNC] Linea risolta dal GTFS-Static per {resolved_static} corse (feed posizioni assente o degradato).")
+
+
 async def _fetch_all_gtt_data_inner() -> dict:
     """Recupera tutti i dati della rete GTT. A prova di bomba: mai eccezioni, mai vuoto."""
     result = {
@@ -384,20 +418,10 @@ async def _fetch_all_gtt_data_inner() -> dict:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
 
-    # Il feed trip_update di GTT non contiene mai route_id: risolviamo la linea
-    # incrociando vehicle_id (e trip_id) con il feed posizioni veicoli.
-    vehicle_trip_routes = {v["trip_id"]: v["route_id"] for v in vehicles if v.get("trip_id") and v.get("route_id")}
-    vehicle_id_routes = {v["vehicle_id"]: v["route_id"] for v in vehicles if v.get("vehicle_id") and v.get("route_id")}
-    for tu in trip_updates:
-        if tu.get("route_id") and tu["route_id"] != "N/A":
-            continue
-        resolved = None
-        if tu.get("vehicle_id"):
-            resolved = vehicle_id_routes.get(tu["vehicle_id"])
-        if not resolved and tu.get("trip_id"):
-            resolved = vehicle_trip_routes.get(tu["trip_id"])
-        if resolved:
-            tu["route_id"] = resolved
+    # Il feed trip_update di GTT non contiene mai route_id: si risolve la
+    # linea incrociando il feed posizioni e, come fonte indipendente, il
+    # GTFS-Static (trips.txt) — vedi _resolve_trip_routes.
+    _resolve_trip_routes(trip_updates, vehicles)
 
     # RITARDO PERFETTO: un mezzo in cambio corsa puo' avere PIU' trip updates
     # contemporanee (vecchia + nuova corsa, 21 mezzi su ~450 in questo momento).
