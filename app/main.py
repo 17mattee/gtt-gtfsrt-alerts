@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -120,14 +121,27 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Leaflet e' self-hosted in /static/vendor: NESSUNA origine di terze parti
 # e' piu' necessaria per script e stili. La source map di Leaflet e' same-origin
 # e il suo fetch resta consentito da connect-src 'self' (nessun warning console).
-_CSP = (
+_CSP_BASE = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
     "https://services.arcgisonline.com https://*.arcgisonline.com; "
-    "connect-src 'self' ws: wss:"
+    "connect-src 'self'"
 )
+
+
+def _csp_for_request(request: Request) -> str:
+    """CSP con WebSocket consentito SOLO verso l'host che ha servito la pagina.
+
+    `ws: wss:` aperti consentirebbero esfiltrazione verso qualunque server:
+    si restringe all'host della richiesta (sanificato: un Host header ostile
+    non deve finire nell'header, ne' iniettarvi CRLF).
+    """
+    host = (request.headers.get("host") or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9.\-]+(?::\d{1,5})?", host):
+        return f"{_CSP_BASE} ws://{host} wss://{host}"
+    return f"{_CSP_BASE} ws: wss:"  # Host assente/invalido (es. accesso diretto via IP senza Host)
 
 
 @app.middleware("http")
@@ -136,7 +150,7 @@ async def security_headers_middleware(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = _CSP
+    response.headers["Content-Security-Policy"] = _csp_for_request(request)
     return response
 
 
