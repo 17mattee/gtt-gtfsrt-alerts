@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
@@ -106,8 +107,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Cartella statica risolta in modo ASSOLUTO dal file sorgente: l'avvio da una
+# working directory diversa dalla root del repo (es. `uvicorn app.main:app`
+# da una subdir) non deve rompere dashboard ne' montaggio /static.
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
 # Monta la cartella statica per servire la UI
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # --- Sicurezza: header di risposta + CSP contro XSS/clickjacking/injection ---
 # Leaflet e' self-hosted in /static/vendor: NESSUNA origine di terze parti
@@ -168,7 +175,7 @@ def _rate_limited(client_ip: str) -> bool:
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def get_dashboard():
-    return FileResponse("static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
