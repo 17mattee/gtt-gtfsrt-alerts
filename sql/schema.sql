@@ -130,8 +130,25 @@ SELECT DISTINCT ON (vehicle_id)
 FROM public.gtt_vehicle_positions
 ORDER BY vehicle_id, recorded_at DESC;
 
+-- --------------------------------------------------------------------------- 
+-- 6. STATO DI SISTEMA PERSISTENTE (anti-crash GTT)
+--    Lo snapshot dell'ultimo sync buono (flotta, corse, avvisi) vive anche su
+--    Supabase: il disco del piano free di Render e' effimero tra i deploy,
+--    cosi' il cold start durante un outage GTT parte comunque con dati reali.
+--    Il middleware lo aggiorna con la chiave 'last_good_snapshot' ogni
+--    STATE_CLOUD_WRITE_SECONDS (default 300s), mai con flotta vuota.
 -- ---------------------------------------------------------------------------
--- 6. RETENTION (opzionale, consigliato per le time-series):
+CREATE TABLE IF NOT EXISTS public.gtt_system_state (
+    key      TEXT PRIMARY KEY,
+    payload  JSONB NOT NULL,
+    saved_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.gtt_system_state
+    ALTER COLUMN saved_at SET DEFAULT now();
+
+-- --------------------------------------------------------------------------- 
+-- 7. RETENTION (opzionale, consigliato per le time-series):
 --    cron giornaliero che cancella le posizioni più vecchie di 30 giorni.
 --    Versione PRONTA e ATTIVA in sql/retention.sql (richiede pg_cron).
 -- ---------------------------------------------------------------------------

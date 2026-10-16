@@ -11,6 +11,7 @@ Garanzie:
 import asyncio
 import json
 import math
+import os
 import re
 import logging
 import time
@@ -48,14 +49,21 @@ SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogn
 #    (deploi, crash del worker): il cold start parte con i dati reali invece
 #    che a zero. File atomico (write + rename), mai bloccante, mai fatale.
 # ----------------------------------------------------------------------------
-OUTAGE_FLEET_TTL_S = 600
-SNAPSHOT_MAX_AGE_S = 900
+# TTL configurabili via env: su Render free un outage GTT lungo non deve
+# svuotare la mappa prima del necessario, ma nemmeno servire dati stantii
+# oltre il senso fisico.
+OUTAGE_FLEET_TTL_S = float(os.getenv("OUTAGE_FLEET_TTL_S", "600"))
+SNAPSHOT_MAX_AGE_S = float(os.getenv("SNAPSHOT_MAX_AGE_S", "900"))
 SNAPSHOT_WRITE_INTERVAL_S = 30
+# Frequenza del salvataggio dello stato su Supabase (piu' raro del disco:
+# un upsert JSONB da ~500KB ogni 30s e' inutile carico sul free tier).
+STATE_CLOUD_WRITE_INTERVAL_S = float(os.getenv("STATE_CLOUD_WRITE_SECONDS", "300"))
 _SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "gtfs_data"
 _SNAPSHOT_FILE = _SNAPSHOT_DIR / "last_good_snapshot.json"
 _last_good_fleet: list = []
 _last_good_fleet_at: float = 0.0
 _last_snapshot_write_at: float = 0.0
+_last_state_cloud_write_at: float = 0.0
 
 # ISTERESI FLOTTA: il feed posizioni GTT fa "lampeggiare" i mezzi — un mezzo
 # puo' sparire per uno-due cicli GPS (20-60s) e tornare, facendo oscillare il
@@ -536,8 +544,16 @@ def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
 
 
 def _save_snapshot_to_disk(result: dict) -> None:
-    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale."""
-    global _last_snapshot_write_at
+    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale.
+
+    Due destinazioni complementari:
+    - DISCO (gtfs_data/, atomica, ogni 30s): veloce, sopravvive ai riavvii
+      del worker, MA il disco del free tier e' effimero tra i deploy;
+    - SUPABASE (tabella gtt_system_state, ogni STATE_CLOUD_WRITE_INTERVAL_S):
+      sopravvive anche ai deploy: il cold start durante un outage GTT parte
+      con i dati reali in ogni caso.
+    """
+    global _last_snapshot_write_at, _last_state_cloud_write_at
     now = time.time()
     if now - _last_snapshot_write_at < SNAPSHOT_WRITE_INTERVAL_S:
         return
@@ -552,23 +568,55 @@ def _save_snapshot_to_disk(result: dict) -> None:
         tmp.replace(_SNAPSHOT_FILE)  # scrittura atomica: mai uno snapshot a meta'
     except Exception as exc:
         logger.warning("Snapshot su disco non salvabile (%s): continuo senza.", exc)
+    if now - _last_state_cloud_write_at >= STATE_CLOUD_WRITE_INTERVAL_S:
+        _last_state_cloud_write_at = now
+        try:
+            from app.database_writer import SYSTEM_STATE_KEY, save_state_to_supabase
+            save_state_to_supabase(SYSTEM_STATE_KEY, payload)
+        except Exception as exc:
+            logger.warning("Stato su Supabase non salvabile (%s): continuo col solo disco.", exc)
+
+
+def _read_disk_snapshot():
+    """Legge lo snapshot da disco (payload completo) o None. Mai eccezioni."""
+    try:
+        if not _SNAPSHOT_FILE.exists():
+            return None
+        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        if payload.get("saved_at") and (payload.get("data") or {}).get("vehicles"):
+            return payload
+    except Exception as exc:
+        logger.warning("Snapshot su disco non leggibile (%s).", exc)
+    return None
 
 
 def load_last_good_snapshot() -> bool:
     """Cold start: ripristina l'ultimo snapshot buono se abbastanza fresco.
 
-    Seeda lo snapshot globale (la UI parte con dati reali mentre il primo sync
-    live gira in background) e il buffer outage. Le sorgenti nel meta vengono
-    dichiarate 'cached': nessun dato ripristinato si spaccia per live.
+    Cerca su DISCO e su SUPABASE e usa il PIU' FRESCO: il disco e' veloce,
+    ma dopo un deploy e' vuoto (free tier effimero) e lo stato cloud salva
+    il cold start durante un outage GTT. Seeda lo snapshot globale (la UI
+    parte con dati reali mentre il primo sync live gira in background) e il
+    buffer outage. Le sorgenti nel meta vengono dichiarate 'cached': nessun
+    dato ripristinato si spaccia per live.
     """
     global _last_good_fleet, _last_good_fleet_at
+    payload = _read_disk_snapshot()
+    origine = "disco"
     try:
-        if not _SNAPSHOT_FILE.exists():
-            return False
-        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        from app.database_writer import SYSTEM_STATE_KEY, load_state_from_supabase
+        cloud = load_state_from_supabase(SYSTEM_STATE_KEY)
+    except Exception:
+        cloud = None
+    if cloud and cloud.get("saved_at") and (cloud.get("data") or {}).get("vehicles"):
+        if not payload or float(cloud.get("saved_at") or 0) > float(payload.get("saved_at") or 0):
+            payload, origine = cloud, "Supabase"
+    if not payload:
+        return False
+    try:
         saved_at = float(payload.get("saved_at") or 0)
         data = payload.get("data") or {}
-        if not data.get("vehicles") or (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
+        if (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
             return False
         meta = dict(data.get("meta") or {})
         for key in ("vehicles_source", "alerts_source", "trip_updates_source"):
@@ -578,11 +626,20 @@ def load_last_good_snapshot() -> bool:
         network_snapshot.update(data)
         _last_good_fleet = [dict(v) for v in data["vehicles"]]
         _last_good_fleet_at = saved_at
-        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono "
+        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono dal {origine} "
               f"({len(data['vehicles'])} mezzi di {int(time.time() - saved_at)}s fa, sorgente 'cached').")
+        if origine == "Supabase":
+            # Riscrivi su disco: il prossimo avvio sara' veloce (no rete).
+            try:
+                _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = _SNAPSHOT_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+                tmp.replace(_SNAPSHOT_FILE)
+            except Exception:
+                pass
         return True
     except Exception as exc:
-        logger.warning("Snapshot su disco non leggibile (%s): cold start normale.", exc)
+        logger.warning("Snapshot non ripristinabile (%s): cold start normale.", exc)
         return False
 
 
