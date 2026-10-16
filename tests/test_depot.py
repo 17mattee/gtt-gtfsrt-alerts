@@ -73,3 +73,22 @@ def test_mark_depot_returns_ultima_corsa():
         assert "rientro_deposito" not in ignoto
     finally:
         gtt_full_sync.gtfs_manager._block_schedules = {}
+
+
+def test_fuori_percorso_spiegato_dal_rientro_deposito():
+    """Un mezzo fuori linea ALLA ULTIMA corsa sta correndo al deposito:
+    il fuori percorso e' SPIEGATO, non 'insolito' (misurato dal vivo: il
+    tram linea 4 verso il deposito Drosso sta a ~3km dal tratto di linea)."""
+    gtt_full_sync.gtfs_manager._block_schedules = {
+        "T2": {"block_id": "B", "trips": ["T1", "T2"]},
+    }
+    try:
+        ultima_fuorilinea = {
+            "vehicle_id": "9002U", "trip_id": "T2",
+            "fuori_percorso": {"distanza_m": 3171, "deviazione_attiva": False},
+        }
+        _mark_depot_returns([ultima_fuorilinea])
+        assert ultima_fuorilinea["rientro_deposito"] is True
+        assert ultima_fuorilinea["fuori_percorso"]["motivo"] == "rientro_deposito"
+    finally:
+        gtt_full_sync.gtfs_manager._block_schedules = {}
