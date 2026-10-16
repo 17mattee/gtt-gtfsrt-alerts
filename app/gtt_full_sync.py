@@ -34,6 +34,7 @@ network_snapshot: dict = {
 }
 
 _last_sequence_refresh = 0.0
+_last_block_refresh = 0.0
 SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
 
 # ----------------------------------------------------------------------------
@@ -646,6 +647,28 @@ def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
     return flagged
 
 
+def _mark_depot_returns(vehicles: list) -> int:
+    """Flagga i mezzi alla ULTIMA corsa del proprio blocco: rientro al deposito.
+
+    Il block_id del GTFS e' la catena di corse che lo stesso mezzo svolge
+    nella giornata di servizio (misurato dal vivo: 463 corse attive su 464
+    hanno un blocco). Chi e' all'ultima corsa del blocco, terminata questa,
+    non ha piu' servizio programmato: probabile rientro al deposito.
+    Nessuna pretesa quando il blocco non e' noto.
+    """
+    marked = 0
+    for v in vehicles:
+        tid = v.get("trip_id") or ""
+        if not tid or tid == "N/A":
+            continue
+        sched = gtfs_manager.get_block_schedule(tid)
+        trips = (sched or {}).get("trips") or []
+        if trips and trips[-1] == tid:
+            v["rientro_deposito"] = True
+            marked += 1
+    return marked
+
+
 async def _fetch_all_gtt_data_inner() -> dict:
     """Recupera tutti i dati della rete GTT. A prova di bomba: mai eccezioni, mai vuoto."""
     result = {
@@ -797,6 +820,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # NB: si includono ANCHE i trip_id dei trip updates (quelli del feed
     # posizioni possono essere vuoti o sfasati durante il cambio corsa).
     global _last_sequence_refresh
+    global _last_block_refresh
     trip_sequences = gtfs_manager.get_trip_sequences()
     active_trips = {v.get("trip_id") for v in vehicles if v.get("trip_id")}
     active_trips |= {tu.get("trip_id") for tu in trip_updates if tu.get("trip_id")}
@@ -810,6 +834,14 @@ async def _fetch_all_gtt_data_inner() -> dict:
             print(f"📍 [SYNC] Fermate programmate caricate dal GTFS-Static: {len(missing)} nuove corse, {len(broken)} sequenze riparate.")
         except Exception as exc:
             logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
+    # Blocchi-corse (catena di corse dello stesso mezzo): servono al rilevamento
+    # del rientro al deposito. Stesso throttling delle sequenze.
+    if (time.time() - _last_block_refresh) > SEQUENCE_REFRESH_INTERVAL:
+        _last_block_refresh = time.time()
+        try:
+            await asyncio.to_thread(gtfs_manager.refresh_block_schedules, active_trips)
+        except Exception as exc:
+            logger.warning("Blocchi-corse non disponibili (%s): rientro deposito non rilevabile.", exc)
 
     # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica per
     # queste corse solo previsioni d'arrivo ASSOLUTE (niente campo delay), in
@@ -1069,6 +1101,11 @@ async def _fetch_all_gtt_data_inner() -> dict:
     if fuori:
         print(f"⚠️ [SYNC] {fuori} mezzi oltre {OFF_ROUTE_THRESHOLD_M}m dal percorso "
               f"ufficiale: dichiarati fuori percorso (deviazione attiva o posizione insolita).")
+
+    # RIENTRO AL DEPOSITO: mezzi all'ultima corsa del proprio blocco-corse.
+    depot = _mark_depot_returns(result["vehicles"])
+    if depot:
+        print(f"🏚️ [SYNC] {depot} mezzi all'ultima corsa del proprio blocco: probabile rientro al deposito.")
 
     # SCIOPERI & EVENTI: doppia fonte con interscambio.
     # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)

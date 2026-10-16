@@ -122,6 +122,7 @@ class GtfsStaticManager:
         self._trip_sequences: dict = {} # trip_id -> [(secondi_dalla_mezzanotte, stop_id), ...]
         self._trip_shapes: dict = {}   # trip_id -> shape_id (geometria ufficiale del percorso)
         self._shapes: dict = {}        # shape_id -> [(lat, lon), ...] ordinati per sequenza
+        self._block_schedules: dict = {} # trip_id -> {"block_id", "trips": [trip_id ordinati]}
         self._cache_loaded_at: float = 0.0
         self._cache_source: str = "fallback"
         self._lock = asyncio.Lock()
@@ -240,6 +241,15 @@ class GtfsStaticManager:
         shape_id = self._trip_shapes.get(str(trip_id or "").strip()) or ""
         return self._shapes.get(shape_id) or []
 
+    def get_block_schedule(self, trip_id: str) -> dict:
+        """Blocco-corse di una corsa: {"block_id", "trips": [trip_id in ordine di partenza]}.
+
+        Il blocco GTFS e' la catena di corse svolte dal MEDESIMO mezzo nella
+        giornata di servizio: l'ultima corsa del blocco e' il probabile
+        rientro al deposito. Vuoto se la corsa non ha blocco.
+        """
+        return self._block_schedules.get(str(trip_id or "").strip()) or {}
+
     def get_trip_headsigns(self) -> dict:
         """Headsign per corsa (trips.txt GTT). ATTENZIONE: per alcune corse
         varianti GTT pubblica l'origine anziche' la destinazione: usare
@@ -306,6 +316,72 @@ class GtfsStaticManager:
         self._trip_sequences.update(in_pass)
         if len(self._trip_sequences) > 3000:
             self._trip_sequences = {k: v for k, v in self._trip_sequences.items() if k in wanted}
+        return added
+
+    def refresh_block_schedules(self, trip_ids) -> int:
+        """Blocchi-corse per le corse richieste: la catena di corse del MEZZO.
+
+        Il block_id del GTFS e' la sequenza di corse che lo stesso veicolo
+        svolge nella giornata di servizio: sapere quante corse seguono la
+        corrente permette di dire se il mezzo sta per rientrare al deposito
+        (ultima corsa del blocco). Letture self-contenute dal pacchetto in
+        cache (trips.txt per i blocchi, stop_times.txt per l'ordine di
+        partenza), da eseguire in un thread. Solo corse dello STESSO
+        service_id del seme: blocchi di altri giorni non c'entrano.
+        """
+        wanted = {str(t) for t in trip_ids if t}
+        if not wanted or not self._zip_bytes:
+            return 0
+        added = 0
+        try:
+            with zipfile.ZipFile(io.BytesIO(self._zip_bytes)) as z:
+                if "trips.txt" not in z.namelist():
+                    return 0
+                trip_block, trip_service, trips_by_block = {}, {}, {}
+                for row in csv.DictReader(io.TextIOWrapper(z.open("trips.txt"), encoding="utf-8-sig")):
+                    tid = (row.get("trip_id") or "").strip()
+                    if not tid:
+                        continue
+                    bid = (row.get("block_id") or "").strip()
+                    svc = (row.get("service_id") or "").strip()
+                    trip_block[tid] = bid
+                    trip_service[tid] = svc
+                    if bid:
+                        trips_by_block.setdefault((svc, bid), []).append(tid)
+                seeds = {}
+                for t in wanted:
+                    bid = trip_block.get(t) or ""
+                    if bid:
+                        seeds[t] = (trip_service.get(t, ""), bid)
+                if not seeds:
+                    return 0
+                block_trips, wanted_all = {}, set()
+                for key in set(seeds.values()):
+                    block_trips[key] = list(trips_by_block.get(key, []))
+                    wanted_all.update(block_trips[key])
+                starts = {}
+                if wanted_all and "stop_times.txt" in z.namelist():
+                    for row in csv.DictReader(io.TextIOWrapper(z.open("stop_times.txt"), encoding="utf-8-sig")):
+                        tid = (row.get("trip_id") or "").strip()
+                        if tid not in wanted_all:
+                            continue
+                        dep = (row.get("departure_time") or row.get("arrival_time") or "").strip()
+                        try:
+                            hh, mm, ss = (int(p) for p in dep.split(":"))
+                        except (ValueError, TypeError):
+                            continue
+                        sec = hh * 3600 + mm * 60 + ss
+                        if tid not in starts or sec < starts[tid]:
+                            starts[tid] = sec
+                for t, key in seeds.items():
+                    ordered = sorted(block_trips.get(key, []), key=lambda x: (starts.get(x, 10 ** 9), x))
+                    self._block_schedules[t] = {"block_id": key[1], "trips": ordered}
+                    added += 1
+        except Exception as exc:
+            logger.warning("Blocchi-corse non leggibili (%s): rilevamento rientro deposito limitato.", exc)
+            return 0
+        if len(self._block_schedules) > 3000:
+            self._block_schedules = {k: v for k, v in self._block_schedules.items() if k in wanted}
         return added
 
     # ------------------------------------------------------------------
