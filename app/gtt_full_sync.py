@@ -51,7 +51,8 @@ SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogn
 # ----------------------------------------------------------------------------
 # TTL configurabili via env: su Render free un outage GTT lungo non deve
 # svuotare la mappa prima del necessario, ma nemmeno servire dati stantii
-# oltre il senso fisico.
+# oltre il senso fisico (il passeggero preferisce un po' di storia onesta
+# a una mappa vuota, entro limiti ragionevoli).
 OUTAGE_FLEET_TTL_S = float(os.getenv("OUTAGE_FLEET_TTL_S", "600"))
 SNAPSHOT_MAX_AGE_S = float(os.getenv("SNAPSHOT_MAX_AGE_S", "900"))
 SNAPSHOT_WRITE_INTERVAL_S = 30
@@ -97,6 +98,17 @@ ESTIMATE_MAX_NEXT_STOP_S = 900
 # di strada senza falsi positivi. Oltre: il mezzo e' dichiarato fuori
 # percorso, con l'eventuale deviazione attiva della linea.
 OFF_ROUTE_THRESHOLD_M = 200
+# Soglia per tipo di mezzo: tram (0), metro (1) e funicolare (7) viaggiano su
+# infrastruttura FISSA (rotaia): bastano 75m per dichiararli fuori percorso
+# (misurato sul feed reale: p99 41m; un tram a 75m dalla propria rotaia e'
+# fuori, non e' rumore GPS). I bus tollerano 200m (deviazioni corte di
+# isolato, canyon urbano).
+FIXED_TRACK_OFF_ROUTE_M = 75
+# Deviazione NON ANNUNCIATA da GTT, dedotta dalla FLOTTA: se almeno N mezzi
+# della STESSA linea sono contemporaneamente fuori percorso senza spiegazione
+# (nessuna deviazione annunciata, nessun rientro al deposito), non e' rumore
+# GPS isolato: e' la linea che sta girando altrove e GTT non l'ha detto.
+UNANNOUNCED_DETOUR_MIN_VEHICLES = 3
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
@@ -653,6 +665,7 @@ def load_last_good_snapshot() -> bool:
     except Exception as exc:
         logger.warning("Snapshot non ripristinabile (%s): cold start normale.", exc)
         return False
+        return False
 
 
 def _distance_to_polyline_m(lat, lon, points) -> float:
@@ -747,6 +760,7 @@ def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
     percorso per costruzione: nessun controllo necessario.
     """
     flagged = 0
+    route_types = gtfs_manager.get_route_types()
     for v in vehicles:
         if v.get("position_source") == "stimata":
             continue
@@ -756,8 +770,11 @@ def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
         pts = gtfs_manager.get_trip_shape(tid)
         if not pts:
             continue
+        # Soglia per tipo: su rotaia bastano 75m, i bus 200m.
+        rtype = route_types.get(v.get("route_id"), 3)
+        threshold = FIXED_TRACK_OFF_ROUTE_M if rtype in (0, 1, 7) else OFF_ROUTE_THRESHOLD_M
         d = _distance_to_polyline_m(v.get("latitude"), v.get("longitude"), pts)
-        if d <= OFF_ROUTE_THRESHOLD_M:
+        if d <= threshold:
             continue
         v["fuori_percorso"] = {
             "distanza_m": int(d),
@@ -793,6 +810,33 @@ def _mark_depot_returns(vehicles: list) -> int:
                 v["fuori_percorso"]["motivo"] = "rientro_deposito"
             marked += 1
     return marked
+
+
+def _detect_unannounced_detours(vehicles: list) -> list:
+    """Deviazioni che GTT NON ha annunciato, dedotte dalla FLOTTA.
+
+    Se almeno UNANNOUNCED_DETOUR_MIN_VEHICLES mezzi della STESSA linea sono
+    contemporaneamente fuori percorso senza spiegazione (nessuna deviazione
+    annunciata, nessun rientro al deposito), non e' rumore GPS isolato: e'
+    la linea che sta girando altrove. Ogni mezzo coinvolto viene marcato
+    'deviazione_rilevata' col numero di mezzi coinvolti: il passeggero vede
+    subito che il suo bus e' deviato ANCHE se GTT non ha pubblicato l'avviso.
+    """
+    per_route = {}
+    for v in vehicles:
+        fp = v.get("fuori_percorso")
+        if not fp or fp.get("deviazione_attiva") or fp.get("motivo"):
+            continue
+        per_route.setdefault(v.get("route_id"), []).append(v)
+    found = []
+    for route, vs in sorted(per_route.items(), key=lambda kv: str(kv[0])):
+        if len(vs) < UNANNOUNCED_DETOUR_MIN_VEHICLES:
+            continue
+        for v in vs:
+            v["fuori_percorso"]["motivo"] = "deviazione_rilevata"
+            v["fuori_percorso"]["mezzi_coinvolti"] = len(vs)
+        found.append((route, len(vs)))
+    return found
 
 
 async def _fetch_all_gtt_data_inner() -> dict:
@@ -1229,9 +1273,16 @@ async def _fetch_all_gtt_data_inner() -> dict:
               f"ufficiale: dichiarati fuori percorso (deviazione attiva o posizione insolita).")
 
     # RIENTRO AL DEPOSITO: mezzi all'ultima corsa del proprio blocco-corse.
+    # PRIMA del rilevatore: un fuori-percorso spiegato dal rientro non deve
+    # contare come indizio di deviazione non annunciata.
     depot = _mark_depot_returns(result["vehicles"])
     if depot:
         print(f"🏚️ [SYNC] {depot} mezzi all'ultima corsa del proprio blocco: probabile rientro al deposito.")
+
+    # Deviazioni NON annunciate dedotte dalla flotta (>= 3 mezzi della stessa
+    # linea fuori percorso senza spiegazione).
+    for route, n in _detect_unannounced_detours(result["vehicles"]):
+        print(f"🗺️ [SYNC] Probabile deviazione NON annunciata sulla linea {route}: {n} mezzi fuori percorso.")
 
     # SCIOPERI & EVENTI: doppia fonte con interscambio.
     # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)

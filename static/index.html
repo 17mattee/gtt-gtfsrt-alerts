@@ -591,6 +591,8 @@
             if (v.fuori_percorso) {
                 const perche = v.fuori_percorso.motivo === 'rientro_deposito'
                     ? 'in rientro al deposito (fine servizio)'
+                    : v.fuori_percorso.motivo === 'deviazione_rilevata'
+                    ? 'probabile deviazione NON annunciata (' + (v.fuori_percorso.mezzi_coinvolti || 'più') + ' mezzi della linea fuori percorso)'
                     : v.fuori_percorso.deviazione_attiva
                     ? 'deviazione attiva sulla linea'
                     : 'posizione insolita rispetto alla linea';
@@ -866,7 +868,7 @@
                     const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;min-width:0;"><strong>Mezzo ${esc(v.vehicle_id)}${v.headsign ? ' → ' + esc(v.headsign) : ''}</strong></div>
-                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${v.capolinea ? (v.capolinea.stato === 'sosta' ? ' · in sosta al capolinea' : v.capolinea.stato === 'attesa_partenza' ? ' · in attesa alla partenza' : ' · in arrivo al capolinea') : ''}${gpsStale ? ' · GPS datato' : ''}${v.position_source === 'stimata' ? ' · posizione stimata' : ''}${v.fuori_percorso && v.fuori_percorso.motivo !== 'rientro_deposito' ? (v.fuori_percorso.deviazione_attiva ? ' · fuori percorso (deviazione)' : ' · fuori percorso') : ''}${v.rientro_deposito ? ' · rientra in deposito' : ''}</span>
+                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${v.capolinea ? (v.capolinea.stato === 'sosta' ? ' · in sosta al capolinea' : v.capolinea.stato === 'attesa_partenza' ? ' · in attesa alla partenza' : ' · in arrivo al capolinea') : ''}${gpsStale ? ' · GPS datato' : ''}${v.position_source === 'stimata' ? ' · posizione stimata' : ''}${v.fuori_percorso && v.fuori_percorso.motivo !== 'rientro_deposito' ? (v.fuori_percorso.motivo === 'deviazione_rilevata' ? ' · fuori percorso (probabile deviazione)' : v.fuori_percorso.deviazione_attiva ? ' · fuori percorso (deviazione)' : ' · fuori percorso') : ''}${v.rientro_deposito ? ' · rientra in deposito' : ''}</span>
                     </div>`;
                 }
             }
