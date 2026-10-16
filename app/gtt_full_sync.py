@@ -469,8 +469,20 @@ def _estimate_unpublished_vehicles(trip_updates: list, vehicles: list, trip_sequ
             frac = min(1.0, max(0.0, 1.0 - remaining / seg))
             plat = prev.get("lat") if prev.get("lat") else nxt["lat"]
             plon = prev.get("lon") if prev.get("lat") else nxt["lon"]
-            lat = plat + (nxt["lat"] - plat) * frac
-            lon = plon + (nxt["lon"] - plon) * frac
+            lat = lon = None
+            # STIMA LUNGO LA GEOMETRIA UFFICIALE: la posizione segue la shape
+            # reale della linea (curve comprese), non la linea d'aria tra le
+            # due fermate che taglierebbe i palazzi.
+            shape = gtfs_manager.get_trip_shape(tid)
+            if shape and len(shape) >= 2:
+                i_prev = _nearest_shape_index(shape, plat, plon)
+                i_next = _nearest_shape_index(shape, nxt["lat"], nxt["lon"])
+                if i_prev is not None and i_next is not None and i_prev < i_next:
+                    lat, lon = _point_along_shape(shape, i_prev, i_next, frac)
+            if lat is None:
+                # Nessuna shape (o proiezione incoerente): linea retta tra fermate.
+                lat = plat + (nxt["lat"] - plat) * frac
+                lon = plon + (nxt["lon"] - plon) * frac
         known.add(vid)
         stop_name = nxt.get("name") or stop_id
         m = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", stop_name)
@@ -672,6 +684,57 @@ def _distance_to_polyline_m(lat, lon, points) -> float:
                 best_sq = d
         px, py = cx, cy
     return math.sqrt(best_sq)
+
+
+def _nearest_shape_index(points, lat, lon):
+    """Indice del punto della polilinea piu' vicino (proiezione euristica)."""
+    if not points or lat is None or lon is None:
+        return None
+    r = 6371000.0
+    kx = math.cos(math.radians(45.07)) * math.pi / 180.0 * r
+    ky = math.pi / 180.0 * r
+    x, y = lon * kx, lat * ky
+    best_i, best_d = None, None
+    for i, (la, lo) in enumerate(points):
+        d = (x - lo * kx) ** 2 + (y - la * ky) ** 2
+        if best_d is None or d < best_d:
+            best_i, best_d = i, d
+    return best_i
+
+
+def _point_along_shape(points, i_from, i_to, frac):
+    """Punto sulla polilinea a frazione 'frac' del percorso tra i_from e i_to.
+
+    La stima segue la GEOMETRIA UFFICIALE della linea (shapes.txt), non la
+    linea d'aria tra le fermate: un mezzo stimato a meta' strada tra due
+    fermate sta sulla strada vera (curve comprese), non dentro i palazzi.
+    """
+    if i_to <= i_from:
+        return points[i_from]
+    r = 6371000.0
+    kx = math.cos(math.radians(45.07)) * math.pi / 180.0 * r
+    ky = math.pi / 180.0 * r
+    seglen = []
+    total = 0.0
+    for i in range(i_from, i_to):
+        ax, ay = points[i][1] * kx, points[i][0] * ky
+        bx, by = points[i + 1][1] * kx, points[i + 1][0] * ky
+        d = math.hypot(bx - ax, by - ay)
+        seglen.append(d)
+        total += d
+    if total <= 0:
+        return points[i_from]
+    target = max(0.0, min(1.0, frac)) * total
+    walked = 0.0
+    for i, d in enumerate(seglen):
+        if walked + d >= target or i == len(seglen) - 1:
+            t = 0.0 if d <= 0 else (target - walked) / d
+            t = max(0.0, min(1.0, t))
+            la1, lo1 = points[i_from + i]
+            la2, lo2 = points[i_from + i + 1]
+            return (la1 + (la2 - la1) * t, lo1 + (lo2 - lo1) * t)
+        walked += d
+    return points[i_to]
 
 
 def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
