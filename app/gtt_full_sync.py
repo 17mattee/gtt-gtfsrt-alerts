@@ -67,7 +67,8 @@ VEHICLE_GRACE_SECONDS = 120
 # (mai posizioni datate spacciate per attuali), e nemmeno fix con timestamp
 # NEL FUTURO (feed GTT corrotto: verificato dal vivo il 13/10/2026, entita'
 # col timestamp a +49 minuti e oggi anche a +29 ORE). Blip GPS di 1-2 cicli:
-# coperti dalla grazia normale di isteresi; outage piu' lunghi: buffer outage.
+# coperti dalla grazia normale di isteresi; outage piu' lunghi: buffer outage
+# e mezzi stimati dalle corse attive.
 # ECCEZIONE FEED STANTIO DI MASSA: se la MEDIANA dei fix pubblicati e' essa
 # stessa oltre l'eta' massima, non e' un mezzo glitchato: e' GTT che pubblica
 # in ritardo TUTTA la flotta. Svuotare la mappa mentre i bus girano per
@@ -76,6 +77,10 @@ VEHICLE_GRACE_SECONDS = 120
 MAX_GPS_AGE_SECONDS = 120
 MAX_GPS_FUTURE_SECONDS = 90
 STALE_FEED_GRACE_SECONDS = 600
+# Posizione STIMATA per i mezzi con corsa attiva ma GPS non pubblicato:
+# la stima vale solo se la prossima fermata prevista e' entro questa finestra
+# (oltre, la corsa non e' ancora partita e mostrare il mezzo sarebbe fantasia).
+ESTIMATE_MAX_NEXT_STOP_S = 900
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
@@ -387,6 +392,96 @@ def _serve_outage_fleet(vehicles: list, trips_active: int = 0) -> tuple:
               f"({len(_last_good_fleet)} mezzi di {age}s fa, max {OUTAGE_FLEET_TTL_S}s), marcata 'cached'.")
         return [dict(v) for v in _last_good_fleet], True
     return vehicles, False
+
+
+def _estimate_unpublished_vehicles(trip_updates: list, vehicles: list, trip_sequences: dict, stops_catalog: dict) -> list:
+    """Posizione STIMATA per i mezzi con corsa attiva ma GPS non pubblicato.
+
+    Misurato dal vivo: ~2% dei mezzi con corsa attiva non compare MAI nel
+    feed posizioni (GPS guasto o non trasmesso da GTT): il passeggero vede
+    il bus per strada ma la mappa no. La stima usa SOLO dati ufficiali GTT:
+    la corsa esiste nel feed trip updates (con il suo ritardo REALE), il
+    percorso e' quello programmato del GTFS-Static; la posizione e'
+    l'interpolazione lungo il segmento fermata precedente -> prossima
+    fermata, in base al tempo d'arrivo previsto (con il ritardo applicato).
+    Ogni mezzo stimato e' dichiarato tale (position_source='stimata'): mai
+    confondibile con un fix GPS, in mappa come nel popup e nell'elenco.
+
+    Non si stima nulla se la prossima fermata prevista e' oltre
+    ESTIMATE_MAX_NEXT_STOP_S: la corsa non e' ancora partita e piazzare il
+    mezzo al capolinea sarebbe fantasia, non stima.
+    """
+    known = {v.get("vehicle_id") for v in vehicles}
+    out = []
+    now = time.time()
+    for tu in trip_updates:
+        vid = tu.get("vehicle_id")
+        if not vid or vid in known:
+            continue
+        tid = tu.get("trip_id") or ""
+        seq = trip_sequences.get(tid)
+        if not seq or len(seq) < 2:
+            continue
+        delay = tu.get("delay_seconds") or 0
+        # Prossima fermata: la previsione assoluta del feed se c'e', altrimenti
+        # il metodo standard orario programmato + ritardo reale della corsa.
+        arrival_ts, stop_id = None, None
+        ns = tu.get("next_stop")
+        if ns and ns.get("arrival_ts"):
+            arrival_ts = ns["arrival_ts"]
+            stop_id = _match_next_stop(seq, arrival_ts, delay)
+        if not stop_id:
+            pred = _predict_next_stop(seq, delay, now=now)
+            if pred:
+                arrival_ts, stop_id = pred
+        if not stop_id or not arrival_ts:
+            continue
+        remaining = arrival_ts - now
+        if remaining > ESTIMATE_MAX_NEXT_STOP_S:
+            continue
+        idx = next((i for i, (_s, sid) in enumerate(seq) if sid == stop_id), None)
+        if idx is None:
+            continue
+        nxt = stops_catalog.get(stop_id) or {}
+        if not nxt.get("lat"):
+            continue
+        if idx == 0:
+            lat, lon = nxt["lat"], nxt["lon"]  # in attesa alla partenza
+        else:
+            prev = stops_catalog.get(seq[idx - 1][1]) or {}
+            seg = max(1, seq[idx][0] - seq[idx - 1][0])
+            frac = min(1.0, max(0.0, 1.0 - remaining / seg))
+            plat = prev.get("lat") if prev.get("lat") else nxt["lat"]
+            plon = prev.get("lon") if prev.get("lat") else nxt["lon"]
+            lat = plat + (nxt["lat"] - plat) * frac
+            lon = plon + (nxt["lon"] - plon) * frac
+        known.add(vid)
+        stop_name = nxt.get("name") or stop_id
+        m = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", stop_name)
+        clean_name = m.group(1).strip() if m else stop_name
+        out.append({
+            "vehicle_id": vid,
+            "trip_id": tid,
+            "route_id": tu.get("route_id") or "N/A",
+            "latitude": round(float(lat), 6),
+            "longitude": round(float(lon), 6),
+            "bearing": None,
+            "speed": None,
+            "timestamp": int(now),
+            "delay_seconds": tu.get("delay_seconds"),
+            "headsign": tu.get("headsign"),
+            "next_stop": {
+                "name": clean_name,
+                "stop_id": stop_id,
+                "arrival_ts": arrival_ts,
+                "minutes": max(0, round(remaining / 60)),
+                "incoerente": False,
+                "prev_stop": _prev_stop_name(seq, stop_id, stops_catalog),
+            },
+            "position_source": "stimata",
+            "verifica": "corsa_attiva",
+        })
+    return out
 
 
 def _remember_good_fleet(vehicles: list, from_buffer: bool) -> None:
@@ -877,6 +972,19 @@ async def _fetch_all_gtt_data_inner() -> dict:
         if tu.get("trip_id") and not tu.get("headsign"):
             tu["headsign"] = headsigns_all.get(tu["trip_id"])
 
+    # MEZZI CON CORSA ATTIVA MA GPS NON PUBBLICATO (misurato dal vivo: ~2% del
+    # parco, il classico bus che il passeggero vede per strada e la mappa no):
+    # posizione STIMATA sul percorso programmato con il ritardo reale della
+    # corsa, dichiarata 'stimata' (position_source) in ogni punto della UI.
+    # Inseriti DOPO gli headsign cosi' hanno capolinea e ritardi completi.
+    estimated_vehicles = _estimate_unpublished_vehicles(
+        trip_updates, result["vehicles"], trip_sequences, stops_catalog
+    )
+    if estimated_vehicles:
+        result["vehicles"] = result["vehicles"] + estimated_vehicles
+        print(f"🧭 [SYNC] {len(estimated_vehicles)} mezzi con corsa attiva ma GPS non "
+              f"pubblicato da GTT: posizione stimata sul percorso programmato, dichiarata 'stimata'.")
+
     # SCIOPERI & EVENTI: doppia fonte con interscambio.
     # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)
     # - NOTIZIE: fonte locale RSS filtrata su mobilita' (30 min di cache)
@@ -922,6 +1030,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
         "trip_updates_source": trip_updates_source,
         "routes_source": gtfs_manager.get_source(),
         "vehicles_count": len(result["vehicles"]),
+        "estimated_vehicles": len(estimated_vehicles),
         "alerts_count": len(result["alerts"]),
         "trip_updates_count": len(result["trip_updates"]),
         "routes_count": len(result["routes_catalog"]),
