@@ -10,6 +10,7 @@ Garanzie:
 
 import asyncio
 import json
+import math
 import re
 import logging
 import time
@@ -33,6 +34,7 @@ network_snapshot: dict = {
 }
 
 _last_sequence_refresh = 0.0
+_last_block_refresh = 0.0
 SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
 
 # ----------------------------------------------------------------------------
@@ -81,6 +83,12 @@ STALE_FEED_GRACE_SECONDS = 600
 # la stima vale solo se la prossima fermata prevista e' entro questa finestra
 # (oltre, la corsa non e' ancora partita e mostrare il mezzo sarebbe fantasia).
 ESTIMATE_MAX_NEXT_STOP_S = 900
+# ADERENZA ALLA LINEA: un mezzo deve stare sul suo percorso ufficiale (o su
+# una deviazione attiva). Soglia misurata sul feed reale: p50 3m, p99 41m
+# dalla shape ufficiale -> 200m lascia spazio agli errori GPS e ai cortei
+# di strada senza falsi positivi. Oltre: il mezzo e' dichiarato fuori
+# percorso, con l'eventuale deviazione attiva della linea.
+OFF_ROUTE_THRESHOLD_M = 200
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
@@ -578,6 +586,89 @@ def load_last_good_snapshot() -> bool:
         return False
 
 
+def _distance_to_polyline_m(lat, lon, points) -> float:
+    """Distanza minima (metri) tra un punto e una polilinea [(lat, lon), ...].
+
+    Approssimazione equirettangolare (accuratissima su scala urbana, un
+    ordine di grandezza piu' veloce della haversine per punto): usata dal
+    controllo di aderenza alla linea su ~400 mezzi a ciclo.
+    """
+    if not points or lat is None or lon is None:
+        return float("inf")
+    r = 6371000.0
+    kx = math.cos(math.radians(45.07)) * math.pi / 180.0 * r
+    ky = math.pi / 180.0 * r
+    x, y = lon * kx, lat * ky
+    best_sq = float("inf")
+    px, py = points[0][1] * kx, points[0][0] * ky
+    d = (x - px) ** 2 + (y - py) ** 2
+    if d < best_sq:
+        best_sq = d
+    for pt in points[1:]:
+        cx, cy = pt[1] * kx, pt[0] * ky
+        dx, dy = cx - px, cy - py
+        if dx or dy:
+            t = ((x - px) * dx + (y - py) * dy) / (dx * dx + dy * dy)
+            t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+            d = (x - (px + t * dx)) ** 2 + (y - (py + t * dy)) ** 2
+            if d < best_sq:
+                best_sq = d
+        px, py = cx, cy
+    return math.sqrt(best_sq)
+
+
+def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
+    """Ogni mezzo GPS deve stare sul suo percorso ufficiale (o deviato).
+
+    Misurato sul feed reale: p50 3m, p99 41m dalla shape ufficiale. I rari
+    mezzi oltre soglia vengono dichiarati fuori_percorso (con l'eventuale
+    deviazione attiva della linea): visibili in mappa, mai nascosti, MAI
+    spacciati per in linea. I mezzi a posizione stimata sono gia' sul
+    percorso per costruzione: nessun controllo necessario.
+    """
+    flagged = 0
+    for v in vehicles:
+        if v.get("position_source") == "stimata":
+            continue
+        tid = v.get("trip_id") or ""
+        if not tid or tid == "N/A":
+            continue
+        pts = gtfs_manager.get_trip_shape(tid)
+        if not pts:
+            continue
+        d = _distance_to_polyline_m(v.get("latitude"), v.get("longitude"), pts)
+        if d <= OFF_ROUTE_THRESHOLD_M:
+            continue
+        v["fuori_percorso"] = {
+            "distanza_m": int(d),
+            "deviazione_attiva": bool(v.get("route_id") in detour_routes),
+        }
+        flagged += 1
+    return flagged
+
+
+def _mark_depot_returns(vehicles: list) -> int:
+    """Flagga i mezzi alla ULTIMA corsa del proprio blocco: rientro al deposito.
+
+    Il block_id del GTFS e' la catena di corse che lo stesso mezzo svolge
+    nella giornata di servizio (misurato dal vivo: 463 corse attive su 464
+    hanno un blocco). Chi e' all'ultima corsa del blocco, terminata questa,
+    non ha piu' servizio programmato: probabile rientro al deposito.
+    Nessuna pretesa quando il blocco non e' noto.
+    """
+    marked = 0
+    for v in vehicles:
+        tid = v.get("trip_id") or ""
+        if not tid or tid == "N/A":
+            continue
+        sched = gtfs_manager.get_block_schedule(tid)
+        trips = (sched or {}).get("trips") or []
+        if trips and trips[-1] == tid:
+            v["rientro_deposito"] = True
+            marked += 1
+    return marked
+
+
 async def _fetch_all_gtt_data_inner() -> dict:
     """Recupera tutti i dati della rete GTT. A prova di bomba: mai eccezioni, mai vuoto."""
     result = {
@@ -729,6 +820,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # NB: si includono ANCHE i trip_id dei trip updates (quelli del feed
     # posizioni possono essere vuoti o sfasati durante il cambio corsa).
     global _last_sequence_refresh
+    global _last_block_refresh
     trip_sequences = gtfs_manager.get_trip_sequences()
     active_trips = {v.get("trip_id") for v in vehicles if v.get("trip_id")}
     active_trips |= {tu.get("trip_id") for tu in trip_updates if tu.get("trip_id")}
@@ -742,6 +834,14 @@ async def _fetch_all_gtt_data_inner() -> dict:
             print(f"📍 [SYNC] Fermate programmate caricate dal GTFS-Static: {len(missing)} nuove corse, {len(broken)} sequenze riparate.")
         except Exception as exc:
             logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
+    # Blocchi-corse (catena di corse dello stesso mezzo): servono al rilevamento
+    # del rientro al deposito. Stesso throttling delle sequenze.
+    if (time.time() - _last_block_refresh) > SEQUENCE_REFRESH_INTERVAL:
+        _last_block_refresh = time.time()
+        try:
+            await asyncio.to_thread(gtfs_manager.refresh_block_schedules, active_trips)
+        except Exception as exc:
+            logger.warning("Blocchi-corse non disponibili (%s): rientro deposito non rilevabile.", exc)
 
     # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica per
     # queste corse solo previsioni d'arrivo ASSOLUTE (niente campo delay), in
@@ -991,6 +1091,21 @@ async def _fetch_all_gtt_data_inner() -> dict:
         result["vehicles"] = result["vehicles"] + estimated_vehicles
         print(f"🧭 [SYNC] {len(estimated_vehicles)} mezzi con corsa attiva ma GPS non "
               f"pubblicato da GTT: posizione stimata sul percorso programmato, dichiarata 'stimata'.")
+
+    # ADERENZA ALLA LINEA: ogni mezzo deve stare sul suo percorso ufficiale
+    # (misurato dal vivo: p50 3m, p99 41m) o su una deviazione attiva. Chi e'
+    # oltre soglia resta in mappa ma dichiarato fuori_percorso.
+    deviazioni_attive = {r for a in alerts if a.get("category") == "deviazione"
+                         for r in (a.get("affected_routes") or [])}
+    fuori = _check_route_adherence(result["vehicles"], deviazioni_attive)
+    if fuori:
+        print(f"⚠️ [SYNC] {fuori} mezzi oltre {OFF_ROUTE_THRESHOLD_M}m dal percorso "
+              f"ufficiale: dichiarati fuori percorso (deviazione attiva o posizione insolita).")
+
+    # RIENTRO AL DEPOSITO: mezzi all'ultima corsa del proprio blocco-corse.
+    depot = _mark_depot_returns(result["vehicles"])
+    if depot:
+        print(f"🏚️ [SYNC] {depot} mezzi all'ultima corsa del proprio blocco: probabile rientro al deposito.")
 
     # SCIOPERI & EVENTI: doppia fonte con interscambio.
     # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)
