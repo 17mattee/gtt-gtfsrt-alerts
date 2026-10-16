@@ -13,13 +13,17 @@ def send_telegram_alert(message: str):
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    # Telegram rifiuta (400) i messaggi oltre 4096 caratteri: un traceback
+    # completo in un alert d'errore poteva superare il limite e la notifica
+    # non partiva MAI, in silenzio. Si tronca con margine per il prefisso.
+    text = f"[GTT Alert Monitor]\n\n{message}"[:4000]
     payload = {
         "chat_id": chat_id,
         # Testo semplice: con parse_mode Markdown un messaggio contenente
         # caratteri come '_' o '[' (tipico nei messaggi d'errore con path
         # o nomi host) veniva rifiutato da Telegram con 400 e la notifica
         # non partiva MAI, in silenzio.
-        "text": f"[GTT Alert Monitor]\n\n{message}",
+        "text": text,
     }
     
     try:
