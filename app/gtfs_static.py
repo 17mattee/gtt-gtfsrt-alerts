@@ -346,9 +346,10 @@ class GtfsStaticManager:
 
     async def _download_routes(self) -> dict:
         # Mirror noti + URL auto-scoperto dal catalogo open-data (a prova di futuro).
+        # Il catalogo usa httpx sincrono: in thread, mai nell'event loop.
         from app.feed_registry import get_feed_urls
         mirrors = []
-        for url in get_feed_urls().get("static", []) + GTFS_STATIC_URLS:
+        for url in (await asyncio.to_thread(get_feed_urls)).get("static", []) + GTFS_STATIC_URLS:
             if url not in mirrors:
                 mirrors.append(url)
         for url in mirrors:

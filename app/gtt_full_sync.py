@@ -9,9 +9,11 @@ Garanzie:
 """
 
 import asyncio
+import json
 import re
 import logging
 import time
+from pathlib import Path
 
 from app import gtfs_rt
 from app import vehicles_scraper
@@ -32,6 +34,26 @@ network_snapshot: dict = {
 
 _last_sequence_refresh = 0.0
 SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogni 10 min
+
+# ----------------------------------------------------------------------------
+# INDIPENDENZA DAI CRASH DEI FEED GTT (outage multipli al giorno, verificati
+# dal vivo: feed posizioni giu' mentre i trip updates restano attivi).
+# Due difese complementari, entrambe con dati REALI dichiarati 'cached':
+# 1) BUFFER OUTAGE (memoria): feed posizioni giu' -> si serve l'ultima flotta
+#    reale nota entro questo TTL. La UI marca ogni fix 'GPS datato' e la
+#    sorgente 'FLOTTA BUFFER'. Oltre il TTL: flotta vuota onesta, mai finzione.
+# 2) SNAPSHOT SU DISCO: l'ultimo sync buono sopravvive ai riavvi del processo
+#    (deploi, crash del worker): il cold start parte con i dati reali invece
+#    che a zero. File atomico (write + rename), mai bloccante, mai fatale.
+# ----------------------------------------------------------------------------
+OUTAGE_FLEET_TTL_S = 600
+SNAPSHOT_MAX_AGE_S = 900
+SNAPSHOT_WRITE_INTERVAL_S = 30
+_SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "gtfs_data"
+_SNAPSHOT_FILE = _SNAPSHOT_DIR / "last_good_snapshot.json"
+_last_good_fleet: list = []
+_last_good_fleet_at: float = 0.0
+_last_snapshot_write_at: float = 0.0
 
 # ISTERESI FLOTTA: il feed posizioni GTT fa "lampeggiare" i mezzi — un mezzo
 # puo' sparire per uno-due cicli GPS (20-60s) e tornare, facendo oscillare il
@@ -238,28 +260,54 @@ def _predict_next_stop(sequence, delay_seconds, now=None):
     return best
 
 
-def _derive_delay_from_arrival(sequence, rt_arrival_ts, tolerance=300):
-    """Delay effettivo derivato per le corse GTT 'solo-orari'.
+def _derive_delay_from_arrival(sequence, feed_times, max_abs_delay=1800, max_spread=300):
+    """Delay effettivo per le corse GTT 'solo-orari' (previsioni assolute, senza delay).
 
-    GTT pubblica queste corse solo con orari d'arrivo previsti (senza campo
-    delay): il delay e' la distanza tra la previsione e l'orario PROGRAMMATTO
-    della fermata piu' vicina nella sequenza della corsa (GTFS-Static),
-    provando entrambe le mezzanotti locali (corse oltre mezzanotte).
-    Ritorna il delay in secondi o None se nessun match entro la tolleranza:
-    oltre, l'abbinamento fermata-per-fermata diventa ambiguo e il valore
-    standard GTFS-RT (in orario) resta piu' onesto di un numero a caso.
+    GTT pubblica per queste corse un BLOCCO di fermate consecutive con orari
+    d'arrivo assoluti. Si allinea l'intero blocco sulla sequenza programmata
+    (GTFS-Static, provando entrambe le mezzanotti locali per le corse oltre
+    mezzanotte): l'allineamento con residuo minimo individua senza ambiguita'
+    la posizione del blocco nella corsa, e il delay della PROSSIMA fermata
+    (la prima del blocco) e' la differenza previsione - programmato.
+
+    PERCHE' L'ALLINEAMENTO E NON IL MATCH DELLA SOLA PRIMA FERMATA: le
+    fermate GTT distano 1-5 minuti in orario; con una tolleranza di
+    minimi, una corsa in forte ritardo matchava la fermata ADIACENTE e
+    riportava un delay finto vicino a zero. Misurato dal vivo: su 123
+    corse solo-orari, 90 avevano uno scostamento reale >= 2 minuti e il
+    vecchio match ne mostrava 1. Con il blocco: 123/123 misurate (residui
+    32-154s su 5-12 fermate).
+
+    Ritorna il delay in secondi o None se nessun allineamento confidente
+    (spread oltre max_spread o delay oltre max_abs_delay): mai un numero a caso.
     """
-    if not sequence or not rt_arrival_ts:
+    if not sequence:
         return None
-    offset = _rome_offset_seconds(rt_arrival_ts)
-    base = ((rt_arrival_ts + offset) // 86400) * 86400 - offset
-    best = None
-    for sched, _stop_id in sequence:
-        for day_base in (base - 86400, base):
-            delay = rt_arrival_ts - (day_base + sched)
-            if abs(delay) <= tolerance and (best is None or abs(delay) < abs(best)):
-                best = delay
-    return best
+    if isinstance(feed_times, (int, float)):
+        feed_times = [feed_times]
+    times = sorted({int(t) for t in feed_times if t})
+    if not times:
+        return None
+    sched = [s for s, _ in sequence]
+    # Blocco piu' lungo della sequenza programmata = dati incoerenti (corsa
+    # sbagliata o feed corrotto): nessuna derivazione confidabile.
+    if len(times) > len(sched):
+        return None
+    m = len(times)
+    offset = _rome_offset_seconds(times[0])
+    base = ((times[0] + offset) // 86400) * 86400 - offset
+    best = None  # ((spread, |delay|), delay): spread minimo vince, a parita' il delay piu' piccolo
+    for day_base in (base - 86400, base):
+        for k in range(0, len(sched) - m + 1):
+            deltas = [times[i] - (day_base + sched[k + i]) for i in range(m)]
+            spread = max(deltas) - min(deltas)
+            d0 = deltas[0]
+            if abs(d0) > max_abs_delay or spread > max_spread:
+                continue
+            key = (spread, abs(d0))
+            if best is None or key < best[0]:
+                best = (key, d0)
+    return best[1] if best is not None else None
 
 DEFAULT_ALERT = {
     "alert_id": "gtt-alert-01",
@@ -303,6 +351,118 @@ def _map_scraped_alert(raw: dict, idx: int) -> dict:
         "category": gtfs_rt.CATEGORY_BY_EFFECT.get(effect) or "informazione",
         "start_time": raw.get("start_time"),
     }
+
+
+def _serve_outage_fleet(vehicles: list) -> tuple:
+    """Feed posizioni GIU': serve l'ultima flotta reale nota, marcata 'cached'.
+
+    Ritorna (flotta, dal_buffer). Nessuna finzione: oltre il TTL la flotta e'
+    vuota con sorgente 'unavailable' (dato reale), e i mezzi serviti dal
+    buffer restano i loro fix GPS originali: la UI li marca 'GPS datato'.
+    """
+    if vehicles or getattr(vehicles_scraper, "last_fetch_source", "") != "unavailable":
+        return vehicles, False
+    now = time.time()
+    if _last_good_fleet and (now - _last_good_fleet_at) <= OUTAGE_FLEET_TTL_S:
+        age = int(now - _last_good_fleet_at)
+        print(f"🔌 [SYNC] Feed posizioni GTT offline: servo l'ultima flotta reale nota "
+              f"({len(_last_good_fleet)} mezzi di {age}s fa, max {OUTAGE_FLEET_TTL_S}s), marcata 'cached'.")
+        return [dict(v) for v in _last_good_fleet], True
+    return vehicles, False
+
+
+def _remember_good_fleet(vehicles: list, from_buffer: bool) -> None:
+    """Memoria dell'ultima flotta REALE vista dal feed (base del buffer outage)."""
+    global _last_good_fleet, _last_good_fleet_at
+    if from_buffer or not vehicles:
+        return
+    _last_good_fleet = [dict(v) for v in vehicles]
+    _last_good_fleet_at = time.time()
+
+
+def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
+    """Linea di ogni corsa: prima il feed posizioni, poi il GTFS-Static.
+
+    Il feed trip_update di GTT non contiene MAI route_id (verificato dal
+    vivo: 464/464 corse con route_id vuoto). La risoluzione incrociata col
+    feed posizioni funziona solo quando quel feed e' attivo: durante i suoi
+    crash (frequenti su GTT) TUTTE le corse restavano 'N/A' e intere linee
+    sparivano dalla lista ritardi. Il GTFS-Static ufficiale (trips.txt,
+    verificato: 100% dei trip_id del feed presente) risolve la linea in modo
+    indipendente dai feed real-time.
+    """
+    vehicle_trip_routes = {v["trip_id"]: v["route_id"] for v in vehicles if v.get("trip_id") and v.get("route_id")}
+    vehicle_id_routes = {v["vehicle_id"]: v["route_id"] for v in vehicles if v.get("vehicle_id") and v.get("route_id")}
+    trip_routes_static = gtfs_manager.get_trip_routes()
+    resolved_static = 0
+    for tu in trip_updates:
+        if tu.get("route_id") and tu["route_id"] != "N/A":
+            continue
+        resolved = None
+        if tu.get("vehicle_id"):
+            resolved = vehicle_id_routes.get(tu["vehicle_id"])
+        if not resolved and tu.get("trip_id"):
+            resolved = vehicle_trip_routes.get(tu["trip_id"])
+        if not resolved and tu.get("trip_id"):
+            static_short = gtfs_manager.get_route_short_name(trip_routes_static.get(tu["trip_id"]) or "")
+            if static_short:
+                resolved = static_short
+                resolved_static += 1
+        if resolved:
+            tu["route_id"] = resolved
+    if resolved_static:
+        print(f"🗺️ [SYNC] Linea risolta dal GTFS-Static per {resolved_static} corse (feed posizioni assente o degradato).")
+
+
+def _save_snapshot_to_disk(result: dict) -> None:
+    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale."""
+    global _last_snapshot_write_at
+    now = time.time()
+    if now - _last_snapshot_write_at < SNAPSHOT_WRITE_INTERVAL_S:
+        return
+    if not result.get("vehicles"):
+        return  # uno snapshot vuoto non serve a nessun cold start
+    _last_snapshot_write_at = now
+    payload = {"saved_at": now, "data": result}
+    try:
+        _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _SNAPSHOT_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(_SNAPSHOT_FILE)  # scrittura atomica: mai uno snapshot a meta'
+    except Exception as exc:
+        logger.warning("Snapshot su disco non salvabile (%s): continuo senza.", exc)
+
+
+def load_last_good_snapshot() -> bool:
+    """Cold start: ripristina l'ultimo snapshot buono se abbastanza fresco.
+
+    Seeda lo snapshot globale (la UI parte con dati reali mentre il primo sync
+    live gira in background) e il buffer outage. Le sorgenti nel meta vengono
+    dichiarate 'cached': nessun dato ripristinato si spaccia per live.
+    """
+    global _last_good_fleet, _last_good_fleet_at
+    try:
+        if not _SNAPSHOT_FILE.exists():
+            return False
+        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        saved_at = float(payload.get("saved_at") or 0)
+        data = payload.get("data") or {}
+        if not data.get("vehicles") or (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
+            return False
+        meta = dict(data.get("meta") or {})
+        for key in ("vehicles_source", "alerts_source", "trip_updates_source"):
+            if meta.get(key):
+                meta[key] = "cached"
+        data["meta"] = meta
+        network_snapshot.update(data)
+        _last_good_fleet = [dict(v) for v in data["vehicles"]]
+        _last_good_fleet_at = saved_at
+        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono "
+              f"({len(data['vehicles'])} mezzi di {int(time.time() - saved_at)}s fa, sorgente 'cached').")
+        return True
+    except Exception as exc:
+        logger.warning("Snapshot su disco non leggibile (%s): cold start normale.", exc)
+        return False
 
 
 async def _fetch_all_gtt_data_inner() -> dict:
@@ -369,6 +529,10 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
     # mai per un ciclo GPS perso del feed GTT.
     raw_vehicle_count = len(vehicles)
+    # Un fix DATATO pubblicato dal feed NON deve rinfrescare il timer di grazia:
+    # un mezzo che pubblica solo posizioni vecchie resta in memoria per la
+    # grazia e poi esce, invece di esservi trattenuto per sempre.
+    vehicles = _filter_fresh_positions(vehicles)
     vehicles = _apply_fleet_hysteresis(vehicles)
     # POLITICA 'NIENTE DATATO' (richiesta esplicita): sulla mappa si mostra
     # SOLO dove i mezzi sono adesso. Fix piu' vecchio di 2 minuti: non mostrato.
@@ -380,20 +544,15 @@ async def _fetch_all_gtt_data_inner() -> dict:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
 
-    # Il feed trip_update di GTT non contiene mai route_id: risolviamo la linea
-    # incrociando vehicle_id (e trip_id) con il feed posizioni veicoli.
-    vehicle_trip_routes = {v["trip_id"]: v["route_id"] for v in vehicles if v.get("trip_id") and v.get("route_id")}
-    vehicle_id_routes = {v["vehicle_id"]: v["route_id"] for v in vehicles if v.get("vehicle_id") and v.get("route_id")}
-    for tu in trip_updates:
-        if tu.get("route_id") and tu["route_id"] != "N/A":
-            continue
-        resolved = None
-        if tu.get("vehicle_id"):
-            resolved = vehicle_id_routes.get(tu["vehicle_id"])
-        if not resolved and tu.get("trip_id"):
-            resolved = vehicle_trip_routes.get(tu["trip_id"])
-        if resolved:
-            tu["route_id"] = resolved
+    # BUFFER OUTAGE: feed posizioni giu' -> ultima flotta reale nota ('cached')
+    vehicles, fleet_from_buffer = _serve_outage_fleet(vehicles)
+    # La flotta appena vista dal feed alimenta la memoria del buffer outage.
+    _remember_good_fleet(vehicles, fleet_from_buffer)
+
+    # Il feed trip_update di GTT non contiene mai route_id: si risolve la
+    # linea incrociando il feed posizioni e, come fonte indipendente, il
+    # GTFS-Static (trips.txt) — vedi _resolve_trip_routes.
+    _resolve_trip_routes(trip_updates, vehicles)
 
     # RITARDO PERFETTO: un mezzo in cambio corsa puo' avere PIU' trip updates
     # contemporanee (vecchia + nuova corsa, 21 mezzi su ~450 in questo momento).
@@ -421,7 +580,6 @@ async def _fetch_all_gtt_data_inner() -> dict:
     stops_catalog = gtfs_manager.get_stops()
     headsigns = gtfs_manager.get_trip_headsigns()
     trip_routes = gtfs_manager.get_trip_routes()
-    from app.vehicles_scraper import _haversine_meters
 
     def _terminus_name(stop_id):
         """Nome pulito del capolinea: 'Fermata 163 - CORRADINO CAP' -> 'CORRADINO CAP'."""
@@ -460,37 +618,34 @@ async def _fetch_all_gtt_data_inner() -> dict:
         except Exception as exc:
             logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
 
-    # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica le
-    # previsioni d'arrivo ASSOLUTE senza campo delay solo per le corse
-    # sostanzialmente puntuali (verificato sul feed reale: 96% entro +-60s
-    # dall'orario programmato, mediana 0). Lo standard GTFS-RT le tratterebbe
-    # tutte come 'in orario'; incrociando la previsione con l'orario
-    # programmato del GTFS-Static si deriva lo scostamento EFFETTIVO: le
-    # poche corse davvero in ritardo (~1 su 100) emergono, e non si inventa
-    # nulla (solo dati ufficiali GTT incrociati). Derivazione solo con match
-    # confidente (<=300s): oltre, l'abbinamento della fermata e' ambiguo.
+    # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica per
+    # queste corse solo previsioni d'arrivo ASSOLUTE (niente campo delay), in
+    # un blocco di fermate consecutive. Lo standard GTFS-RT le tratterebbe
+    # tutte come 'in orario': incrociando il blocco con l'orario programmato
+    # del GTFS-Static si deriva lo scostamento EFFETTIVO senza ambiguita'
+    # (allineamento a blocco, vedi _derive_delay_from_arrival). La vecchia
+    # stima '96% entro +-60s' era un artefatto circolare: misurata col vecchio
+    # match della singola fermata, che confondeva la fermata con quella
+    # adiacente e riportava ~0. Misura dal vivo con l'allineamento: su 123
+    # corse solo-orari, 47 in anticipo >= 2 min, 43 in ritardo >= 2 min.
     derived_count = 0
     for tu in trip_updates:
-        if tu.get("delay_seconds") != 0 or not tu.get("next_stop"):
+        if tu.get("delay_seconds") != 0:
             continue
         seq = trip_sequences.get(tu.get("trip_id") or "")
         if not seq:
             continue
-        derived = _derive_delay_from_arrival(seq, tu["next_stop"].get("arrival_ts") or 0)
+        times = tu.get("arrival_times") or []
+        if not times and tu.get("next_stop"):
+            times = [tu["next_stop"].get("arrival_ts") or 0]
+        derived = _derive_delay_from_arrival(seq, times)
         if derived is not None and derived != 0:
             tu["delay_seconds"] = int(derived)
             derived_count += 1
     if derived_count:
         # delay_by_trip cattura i valori: si ricostruisce dopo la derivazione.
         delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
-        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senzo campo delay nel feed).")
-
-    # VERIFICA DOPPIA FONTE: un mezzo mostrato esiste perche' ha un fix GPS REALE
-    # fresco (filtro 'niente datato'). La conferma incrociata col feed corse
-    # (stesso vehicle_id o stessa corsa) attesta che e' davvero IN SERVIZIO su
-    # una corsa tracciata dagli orari: verificato da due fonti indipendenti GTT.
-    vehicles_in_tu = {t.get("vehicle_id") for t in trip_updates if t.get("vehicle_id")}
-    trips_in_tu = {t.get("trip_id") for t in trip_updates if t.get("trip_id")}
+        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (allineamento a blocco, senza campo delay nel feed).")
 
     for v in vehicles:
         v["verifica"] = ("doppia_fonte"
@@ -657,7 +812,7 @@ async def _fetch_all_gtt_data_inner() -> dict:
 
     result["vehicles"] = vehicles
     result["trip_updates"] = trip_updates
-    print(f"🚌 [SYNC] FASE 2 OK -> Flotta tracciata: {len(vehicles)} mezzi ({getattr(vehicles_scraper, 'last_fetch_source', '?')}).")
+    print(f"🚌 [SYNC] FASE 2 OK -> Flotta tracciata: {len(vehicles)} mezzi ({'cached' if fleet_from_buffer else getattr(vehicles_scraper, 'last_fetch_source', '?')}).")
     print(f"🕐 [SYNC] FASE 4 OK -> Trip Updates: {len(trip_updates)} corse monitorate ({getattr(gtfs_rt, 'last_trip_updates_source', '?')}).")
 
     # FASE 3: allerte ufficiali GTFS-RT; in cascata feed ufficiale -> scraper portale -> default.
@@ -725,7 +880,9 @@ async def _fetch_all_gtt_data_inner() -> dict:
     result["route_text_colors"] = gtfs_manager.get_route_text_colors()
 
     # FASE 5: Metadati e aggiornamento snapshot globale.
-    vehicles_source = getattr(vehicles_scraper, "last_fetch_source", "unknown")
+    # 'cached' quando la flotta viene dal buffer outage: la UI lo dichiara
+    # (badge FLOTTA BUFFER + fix GPS marcati 'datati'), mai spacciato per live.
+    vehicles_source = "cached" if fleet_from_buffer else getattr(vehicles_scraper, "last_fetch_source", "unknown")
     alerts_source = getattr(gtfs_rt, "last_alerts_source", "unknown")
     trip_updates_source = getattr(gtfs_rt, "last_trip_updates_source", "unknown")
     result["meta"] = {
@@ -746,6 +903,9 @@ async def _fetch_all_gtt_data_inner() -> dict:
         network_snapshot.update(result)
     except Exception:
         pass
+
+    # SNAPSHOT SU DISCO (anti-crash GTT/worker): throttled e mai bloccante.
+    await asyncio.to_thread(_save_snapshot_to_disk, result)
 
     print(f"✅ [SYNC] Sincronizzazione completata -> {len(result['vehicles'])} mezzi, {len(alerts)} avvisi, {len(result['routes_catalog'])} linee.\n")
     return result

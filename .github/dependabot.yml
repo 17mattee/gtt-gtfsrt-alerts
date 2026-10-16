@@ -26,7 +26,7 @@ updates:
       timezone: "Europe/Rome"
     labels: ["dependencies", "github-actions"]
 
-  # Immagine base del Dockerfile (python:3.11-slim)
+  # Immagine base del Dockerfile (python:3.14-slim)
   - package-ecosystem: "docker"
     directory: "/"
     schedule:

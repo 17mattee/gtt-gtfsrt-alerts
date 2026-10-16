@@ -203,6 +203,85 @@ def test_delay_derivato_corsa_dopo_mezzanotte():
     assert derived == 120, f"atteso 120s di ritardo, derivato {derived}"
 
 
+def _seq_realistica():
+    """Sequenza con intervalli NON uniformi (60-300s), come le fermate reali GTT:
+    e' cio' che rende l'allineamento a blocco non ambiguo."""
+    gaps = [0, 120, 180, 60, 240, 300, 90, 150, 210, 120]
+    seq, t = [], 50400  # parte alle 14:00 locali
+    for i, g in enumerate(gaps):
+        t += g
+        seq.append((t, f"S_{i}"))
+    return seq
+
+
+def test_delay_derivato_allineamento_ritardo_forte():
+    """Ritardo VERO oltre la vecchia tolleranza: il blocco di fermate lo misura.
+
+    Misurato dal vivo: corse con +1184s reali venivano mostrate 'in orario'
+    perche' il match della singola fermata confondeva la fermata adiacente."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()  # 14:00 Roma
+    seq = _seq_realistica()
+    k_true, delay = 3, 1184
+    sched = [s for s, _ in seq]
+    # il feed pubblica le prossime 5 fermate, tutte in ritardo di 1184s
+    times = [base_utc - 50400 + sched[k_true + i] + delay for i in range(5)]
+    derived = _derive_delay_from_arrival(seq, times)
+    assert derived == 1184, f"atteso 1184s, derivato {derived}"
+
+
+def test_delay_derivato_allineamento_anticipo_forte():
+    """Anticipo VERO oltre la vecchia tolleranza (caso misurato: -325s)."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    seq = _seq_realistica()
+    k_true, delay = 2, -325
+    sched = [s for s, _ in seq]
+    times = [base_utc - 50400 + sched[k_true + i] + delay for i in range(6)]
+    derived = _derive_delay_from_arrival(seq, times)
+    assert derived == -325, f"atteso -325s, derivato {derived}"
+
+
+def test_delay_derivato_allineamento_puntuale():
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    seq = _seq_realistica()
+    sched = [s for s, _ in seq]
+    times = [base_utc - 50400 + sched[1 + i] + 25 for i in range(4)]  # 25s di ritardo reale
+    assert _derive_delay_from_arrival(seq, times) == 25
+
+
+def test_delay_derivato_allineamento_non_confidente_none():
+    """Previsioni non allineabili su nessun blocco della corsa: None, mai un numero a caso."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    seq = _seq_realistica()
+    # tempi a spaziatura incompatibile con la sequenza (spread enorme)
+    times = [base_utc + 700 + i * 17 for i in range(5)]
+    assert _derive_delay_from_arrival(seq, times) is None
+    # tempi oltre il delay plausibile
+    assert _derive_delay_from_arrival(seq, [base_utc + 7200]) is None
+
+
+def test_delay_derivato_blocco_piu_lungo_della_corsa_non_crasha():
+    """Dato anomalo (piu' fermate nel feed che nella corsa): difensivo, mai crash."""
+    from datetime import datetime, timezone
+    from app.gtt_full_sync import _derive_delay_from_arrival
+
+    base_utc = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc).timestamp()
+    seq = [(50400, "S_0"), (50640, "S_1")]
+    times = [base_utc + 640 + i * 60 for i in range(10)]
+    assert _derive_delay_from_arrival(seq, times) is None
+
+
 def test_prev_stop_name():
     """'Tra la fermata X e Y': la fermata precedente in sequenza alla prossima."""
     from app.gtt_full_sync import _prev_stop_name

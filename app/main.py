@@ -3,15 +3,17 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.transit import gtfs_realtime_pb2
 
-from app.gtt_full_sync import fetch_all_gtt_data, get_network_snapshot
+from app.gtt_full_sync import fetch_all_gtt_data, get_network_snapshot, load_last_good_snapshot
 from app.websocket_manager import manager
 
 logging.basicConfig(
@@ -93,6 +95,9 @@ async def _background_refresher() -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Anti-crash GTT: se il processo riparte mentre i feed sono giu', il cold
+    # start parte con l'ultimo snapshot buono dal disco invece che a zero.
+    await asyncio.to_thread(load_last_good_snapshot)
     refresher = asyncio.create_task(_background_refresher())
     logger.info("🚀 Avvio GTT Enterprise Middleware: refresher real-time attivo.")
     yield
@@ -106,21 +111,40 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Cartella statica risolta in modo ASSOLUTO dal file sorgente: l'avvio da una
+# working directory diversa dalla root del repo (es. `uvicorn app.main:app`
+# da una subdir) non deve rompere dashboard ne' montaggio /static.
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
 # Monta la cartella statica per servire la UI
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # --- Sicurezza: header di risposta + CSP contro XSS/clickjacking/injection ---
 # Leaflet e' self-hosted in /static/vendor: NESSUNA origine di terze parti
 # e' piu' necessaria per script e stili. La source map di Leaflet e' same-origin
 # e il suo fetch resta consentito da connect-src 'self' (nessun warning console).
-_CSP = (
+_CSP_BASE = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
     "https://services.arcgisonline.com https://*.arcgisonline.com; "
-    "connect-src 'self' ws: wss:"
+    "connect-src 'self'"
 )
+
+
+def _csp_for_request(request: Request) -> str:
+    """CSP con WebSocket consentito SOLO verso l'host che ha servito la pagina.
+
+    `ws: wss:` aperti consentirebbero esfiltrazione verso qualunque server:
+    si restringe all'host della richiesta (sanificato: un Host header ostile
+    non deve finire nell'header, ne' iniettarvi CRLF).
+    """
+    host = (request.headers.get("host") or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9.\-]+(?::\d{1,5})?", host):
+        return f"{_CSP_BASE} ws://{host} wss://{host}"
+    return f"{_CSP_BASE} ws: wss:"  # Host assente/invalido (es. accesso diretto via IP senza Host)
 
 
 @app.middleware("http")
@@ -129,7 +153,7 @@ async def security_headers_middleware(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = _CSP
+    response.headers["Content-Security-Policy"] = _csp_for_request(request)
     return response
 
 
@@ -168,7 +192,7 @@ def _rate_limited(client_ip: str) -> bool:
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def get_dashboard():
-    return FileResponse("static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

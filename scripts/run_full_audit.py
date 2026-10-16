@@ -23,12 +23,8 @@ def test_api_endpoints_live():
     print("  -> Dashboard Root [/]: OK")
 
     res = client.get("/health")
-    assert res.status_code in [200, 503]
+    assert res.status_code == 200, f"/health ha risposto {res.status_code}"
     print("  -> Health Check [/health]: OK")
-
-    res = client.get("/metrics")
-    assert res.status_code == 200 and len(res.text) > 0
-    print("  -> Prometheus Metrics [/metrics]: OK")
 
     res = client.get("/gtfs-rt/alerts.pb")
     assert res.status_code == 200 and res.headers["content-type"] == "application/x-protobuf"

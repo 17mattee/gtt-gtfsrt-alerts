@@ -73,7 +73,8 @@ def extract_start_time(text: str):
             # (su Render e' UTC: senza di cio' ogni avviso risulterebbe
             # spostato di 1-2 ore).
             return int(dt.replace(tzinfo=timezone(timedelta(seconds=_rome_offset_seconds(dt)))).timestamp())
-        except:
+        except (ValueError, TypeError):
+            # data illeggibile (es. 32/13/2026): orario di pubblicazione
             pass
     return int(time.time())
 

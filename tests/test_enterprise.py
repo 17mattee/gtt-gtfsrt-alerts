@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from google.transit import gtfs_realtime_pb2
-import os
 import docker
 
 client = TestClient(app)
@@ -44,13 +43,15 @@ def test_rate_limiting_protection():
     assert response.status_code in [200, 503]
 
 @pytest.mark.skipif(not is_docker_available(), reason="Docker daemon non attivo o non disponibile")
-def test_real_database_and_redis_containers():
+def test_real_database_and_redis_containers(monkeypatch):
     from testcontainers.postgres import PostgresContainer
     from testcontainers.redis import RedisContainer
     
     with PostgresContainer("postgres:15-alpine") as postgres, RedisContainer("redis:7-alpine") as redis_container:
-        os.environ["DATABASE_URL"] = postgres.get_connection_url().replace("psycopg2", "psycopg")
-        os.environ["REDIS_URL"] = f"redis://{redis_container.get_container_host_ip()}:{redis_container.get_exposed_port(6379)}"
+        # monkeypatch (non os.environ diretto): ripristino automatico a fine
+        # test, nessuna variabile spacciata agli altri test della sessione.
+        monkeypatch.setenv("DATABASE_URL", postgres.get_connection_url().replace("psycopg2", "psycopg"))
+        monkeypatch.setenv("REDIS_URL", f"redis://{redis_container.get_container_host_ip()}:{redis_container.get_exposed_port(6379)}")
         
         from app.database import fetch_latest_alerts_from_db
         alerts = fetch_latest_alerts_from_db()

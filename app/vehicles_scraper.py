@@ -9,6 +9,7 @@ Caratteristiche:
 - La velocita' non e' trasmessa da GTT: viene calcolata dagli spostamenti GPS reali.
 """
 
+import asyncio
 import logging
 import math
 import time
@@ -54,8 +55,21 @@ _last_fail_at = 0.0
 
 # Il feed veicoli di GTT NON trasmette il campo speed: lo calcoliamo dalla
 # distanza tra posizioni GPS consecutive (dato reale, mai inventato).
-_previous_positions: dict = {}  # vehicle_id -> (lat, lon, timestamp)
+# Ogni voce tiene anche l'ultima velocita' valida: un fix ripetuto (stesso
+# timestamp per 2-3 cicli, frequente nei feed GTT) non deve far perdere il
+# valore noto.
+_previous_positions: dict = {}  # vehicle_id -> (lat, lon, timestamp, ultima_velocita)
 MAX_REALISTIC_SPEED_MS = 30.0  # ~108 km/h: soglia anti-GPS-jitter
+# Spostamento sotto questa soglia = dentro il rumore GPS (precisione urbana
+# ~5-15m): il mezzo e' FERMO, si riporta 0.0 invece di velocita' fantasma da
+# 1-4 m/s che manderebbero in tilt il rilevamento capolinea (soglia 1.5 m/s).
+SPEED_NOISE_FLOOR_M = 5.0
+# Oltre questa finestra tra due fix la media distanza/tempo non rappresenta
+# piu' la velocita' ATTUALE del mezzo: nessun valore (n/d), mai un numero
+# a caso. Il mezzo resta tracciato in memoria per la stessa durata, cosi'
+# un lampeggio GPS di un ciclo non azzera il calcolo.
+SPEED_MAX_WINDOW_S = 300.0
+POSITIONS_MEMORY_TTL_S = 300.0  # coerenza con SPEED_MAX_WINDOW_S
 
 
 def _haversine_meters(lat1, lon1, lat2, lon2) -> float:
@@ -71,27 +85,53 @@ def _haversine_meters(lat1, lon1, lat2, lon2) -> float:
 def _real_speed(vehicle: dict):
     """Velocita' reale in m/s derivata dagli spostamenti GPS tra cicli consecutivi.
 
-    Restituisce None se il mezzo e' comparso per la prima volta: in quel caso
-    la UI mostra 'n/d' invece di inventare uno zero.
+    Restituisce None se il mezzo e' comparso per la prima volta (o dopo una
+    finestra troppo lunga): in quel caso la UI mostra 'n/d' invece di
+    inventare uno zero.
+
+    Regole di precisione (ognuna difende un caso osservabile sul feed GTT):
+    - fix RIPETUTO (stesso timestamp, tipico di GTT per 2-3 cicli): nessuna
+      informazione di movimento nuova, si conserva l'ultima velocita' nota
+      invece di perderla con un 'n/d';
+    - fix FUORI ORDINE (piu' vecchio del riferimento in memoria): ignorato,
+      il riferimento piu' fresco resta il migliore per il calcolo successivo;
+    - spostamento sotto il rumore GPS: FERMO (0.0), non velocita' fantasma;
+    - SALTO GPS (oltre ~108 km/h): il fix glitchato NON diventa il nuovo
+      riferimento, altrimenti avvelenerebbe anche il ciclo successivo; si
+      conserva l'ultima velocita' valida;
+    - finestra oltre SPEED_MAX_WINDOW_S: media non rappresentativa, n/d.
     """
     vid = vehicle.get("vehicle_id")
     lat, lon = vehicle.get("latitude"), vehicle.get("longitude")
     ts = vehicle.get("timestamp") or int(time.time())
     prev = _previous_positions.get(vid)
 
-    _previous_positions[vid] = (lat, lon, ts)
-
     if prev is None:
+        _previous_positions[vid] = (lat, lon, ts, None)
         return None
 
-    prev_lat, prev_lon, prev_ts = prev
+    prev_lat, prev_lon, prev_ts, last_speed = prev
+    if ts <= prev_ts:
+        # Fix ripetuto o fuori ordine: il riferimento precedente (piu' fresco)
+        # resta in memoria e la velocita' nota non si perde.
+        return last_speed
+
     dt = ts - prev_ts
-    if dt <= 0:
+    if dt > SPEED_MAX_WINDOW_S:
+        # Finestra troppo lunga: la media non dice nulla della velocita' di ADESSO.
+        _previous_positions[vid] = (lat, lon, ts, None)
         return None
+
     dist = _haversine_meters(prev_lat, prev_lon, lat, lon)
-    speed = dist / dt
-    if speed > MAX_REALISTIC_SPEED_MS:
-        return None  # salto GPS: dato inaffidabile, meglio nessun valore
+    if dist < SPEED_NOISE_FLOOR_M:
+        speed = 0.0  # spostamento nel rumore GPS: mezzo fermo
+    else:
+        speed = dist / dt
+        if speed > MAX_REALISTIC_SPEED_MS:
+            # Salto GPS: il fix NON aggiorna il riferimento (non deve
+            # avvelenare il prossimo calcolo); resta l'ultima velocita' valida.
+            return last_speed
+    _previous_positions[vid] = (lat, lon, ts, speed)
     return round(speed, 1)
 
 
@@ -103,7 +143,7 @@ async def fetch_gtt_vehicle_positions() -> list:
     la Control Room mostra la verita', mai mezzi inventati.
     Durante un outage la cascata non viene ritentata per VEHICLES_FAIL_TTL
     (backoff): l'isteresi di gtt_full_sync mantiene la flotta in ultima
-    posizione nota, marcatata come datata.
+    posizione nota, marcata come datata.
     """
     global last_fetch_source, _last_fail_at
     if _last_fail_at and (time.time() - _last_fail_at) < VEHICLES_FAIL_TTL:
@@ -113,7 +153,12 @@ async def fetch_gtt_vehicle_positions() -> list:
     valid_but_empty = False
     print("🔍 [SCRAPER] Avvio telemetria flotta GTT (GTFS-RT Vehicle Positions)...")
 
-    for url in _vehicle_endpoints():
+    # La scoperta degli URL usa httpx SINCRONO in cache: a scadenza TTL la
+    # chiamata gira in un thread dedicato per non bloccare l'event loop
+    # (refresher + WebSocket) per l'intero timeout HTTP.
+    urls = await asyncio.to_thread(_vehicle_endpoints)
+
+    for url in urls:
         try:
             async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
                 response = await client.get(url)
@@ -138,8 +183,13 @@ async def fetch_gtt_vehicle_positions() -> list:
                     if not (TURIN_BBOX["lon_min"] <= lon <= TURIN_BBOX["lon_max"]):
                         continue
                     route_id = v.trip.route_id if v.HasField("trip") else ""
+                    # ID univoco DI FALLBACK: l'ID mancante NON deve collassare
+                    # tutti i mezzi anonimi in un solo "GTT-BUS" (sarebbe un
+                    # mezzo invece di N). Si usa l'id dell'entita' del feed o,
+                    # in ultima istanza, un progressivo del ciclo.
+                    fallback_id = f"GTT-VEH-{entity.id}" if entity.id else f"GTT-VEH-{len(vehicles)}"
                     vehicle = {
-                        "vehicle_id": v.vehicle.id or "GTT-BUS",
+                        "vehicle_id": v.vehicle.id or fallback_id,
                         "trip_id": v.trip.trip_id if v.HasField("trip") else "N/A",
                         # route_id GTFS (es. "2U") tradotto nel nome linea reale (es. "2")
                         "route_id": gtfs_manager.get_route_short_name(route_id) or "N/A",
@@ -155,23 +205,30 @@ async def fetch_gtt_vehicle_positions() -> list:
                     vehicle["speed"] = computed if computed is not None else feed_speed
                     vehicles.append(vehicle)
 
-            # Difensivo: se il feed pubblicasse lo stesso mezzo due volte, si deduplica.
-            seen_ids = set()
-            deduped = []
+            # Difensivo: se il feed pubblicasse lo stesso mezzo due volte, si
+            # deduplica tenendo il fix PIU' RECENTE (il primo esemplare
+            # potrebbe essere la posizione del ciclo precedente).
+            latest: dict = {}
             for v in vehicles:
-                if v["vehicle_id"] not in seen_ids:
-                    seen_ids.add(v["vehicle_id"])
-                    deduped.append(v)
-            vehicles = deduped
+                vid = v["vehicle_id"]
+                if vid not in latest or (v.get("timestamp") or 0) > (latest[vid].get("timestamp") or 0):
+                    latest[vid] = v
+            vehicles = list(latest.values())
 
             # Feed raggiunto: mostra ESATTAMENTE quello che GTT pubblica,
             # anche se in questo momento sono pochissimi mezzi.
             last_fetch_source = "live"
             _last_fail_at = 0.0
             if vehicles:
-                current_ids = {v["vehicle_id"] for v in vehicles}
-                for stale in list(set(_previous_positions) - current_ids):
-                    _previous_positions.pop(stale, None)
+                # Memoria posizioni con TTL: un mezzo che lampeggia (assente
+                # per un ciclo GPS) NON perde il riferimento, cosi' alla
+                # ricomparsa la velocita' si calcola dal fix precedente e non
+                # riparte da 'n/d'. Il TTL coincide con la finestra massima di
+                # calcolo della velocita'.
+                now = time.time()
+                for stale_id, entry in list(_previous_positions.items()):
+                    if now - entry[2] > POSITIONS_MEMORY_TTL_S:
+                        _previous_positions.pop(stale_id, None)
                 with_speed = sum(1 for v in vehicles if v.get("speed") is not None)
                 print(f"✅ [SCRAPER] Feed UFFICIALE GTT: {len(vehicles)} mezzi reali pubblicati e tracciati (velocita' reale calcolata per {with_speed}).")
                 return vehicles
