@@ -599,7 +599,13 @@
                     html += '<div class="popup-row" style="color:#b96b00;">⚠ Previsione GTT non coerente con la posizione GPS attuale</div>';
                 }
             }
-            html += '<div class="popup-row" style="color:#8a8a86;">GPS ' + gpsTime + (gpsAge != null ? ' (' + gpsAge + 's fa)' : '') + (gpsAge != null && gpsAge > 120 ? ' · segnale datato' : '') + '</div>';
+            if (v.position_source === 'stimata') {
+                // Nessun GPS: l'orario mostrato e' quello del calcolo della
+                // stima, MAI spacciato per un fix GPS.
+                html += '<div class="popup-row" style="color:#8a8a86;">Posizione stimata · aggiornata ' + gpsTime + '</div>';
+            } else {
+                html += '<div class="popup-row" style="color:#8a8a86;">GPS ' + gpsTime + (gpsAge != null ? ' (' + gpsAge + 's fa)' : '') + (gpsAge != null && gpsAge > 120 ? ' · segnale datato' : '') + '</div>';
+            }
             if (lineAlerts.length) {
                 html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
                 lineAlerts.slice(0, 2).forEach(al => { html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + esc(al.header) + '</div>'; });
