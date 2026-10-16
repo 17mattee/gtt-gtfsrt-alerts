@@ -4,7 +4,7 @@ beautifulsoup4>=4.15.0
 fastapi>=0.100.0
 uvicorn>=0.54.0
 httpx>=0.28.1
-supabase>=2.0.0
+supabase>=2.32.0
 psycopg[binary]>=3.3.6
 tenacity==9.2.1
 pybreaker==1.4.1
