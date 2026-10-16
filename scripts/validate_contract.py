@@ -231,9 +231,17 @@ async def validate_ws(base_ws, max_vehicles=50_000):
             noti = sum(1 for r in sample_routes if r in rtypes or r == "N/A")
             check(f"tipo mezzo noto per le linee in mappa ({noti}/{len(sample_routes)})", noti >= 0.95 * len(sample_routes) if sample_routes else True)
 
-        # secondo messaggio: la parte statica non si riinvia se invariata
+        # Secondo messaggio: la parte statica (~60KB) NON va rispedita se
+        # invariata; se e' presente deve essere PERCHE' e' cambiata rispetto
+        # al primo push (il vecchio check non poteva mai fallire: controllava
+        # nulla).
         second = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
-        check("secondo push: senza parte statica se invariata", "static" not in second["data"] or second["data"]["static"] is not None)
+        second_static = second["data"].get("static")
+        if second_static is None:
+            check("secondo push: parte statica invariata NON rispedita", True)
+        else:
+            check("secondo push: parte statica rispedita solo se cambiata",
+                  second_static != static, "static identica al primo push ma rispedita")
 
 
 def validate_rate_limit(base):

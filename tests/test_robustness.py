@@ -318,7 +318,6 @@ def test_trip_updates_buffer_su_fallimento_transitorio(monkeypatch):
 def test_catalogo_stale_durante_outage_totale():
     """Outage GTT lungo: il catalogo resta 215 linee (stale), NON crolla a 73."""
     import asyncio
-    from app import gtfs_static as gs
     from app.gtfs_static import gtfs_manager
 
     gtfs_manager._routes_cache = {"4": "x", "15": "y"}
