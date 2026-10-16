@@ -506,14 +506,13 @@
         // ALMENO 2 min in anticipo = blu (il mezzo parte in anticipo, rischio
         // di perderlo), ALMENO 2 min di ritardo = arancione (fino a 5),
         // oltre 5 min = rosso. Il confine a 120s e' INCLUSIVO su entrambi i
-        // lati: 120s precisi = "2 min di ritardo/anticipo" marcati, coerenti
-        // col testo (sotto i 2 min la tolleranza resta verde: e' anche lo
-        // standard dei gestori, evita rumore da GPS).
+        // lati: il TESTO segue la STESSA soglia dei colori (delayClass), cosi'
+        // una corsa non puo' mai essere verde col testo "1 min di ritardo".
         // delay null = feed ritardi GTT non disponibile: MAI mostrato come orario.
         function fmtDelay(seconds) {
             if (seconds == null) return 'ritardo n/d';
             const min = Math.floor(Math.abs(seconds) / 60);
-            if (min < 1) return 'in orario';
+            if (min < 2) return 'in orario';
             if (seconds < 0) return min + ' min in anticipo';
             return min + ' min di ritardo';
         }
