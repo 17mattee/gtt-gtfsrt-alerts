@@ -797,6 +797,13 @@ async def _fetch_all_gtt_data_inner() -> dict:
             # Corsa non tracciata nei trip update: in orario (standard GTFS-RT).
             v["delay_seconds"] = 0
 
+        # CORSA DI RISCONTRO dal feed corse: il feed posizioni spesso non
+        # pubblica il trip_id (popup 'Corsa n/d' anche per i mezzi a doppia
+        # fonte), ma la corsa REALE del mezzo e' nota dal feed corse GTT
+        # (stesso vehicle_id). Backfill SOLO se il mezzo non ha gia' il suo.
+        if chosen is not None and chosen.get("trip_id") and (not v.get("trip_id") or v.get("trip_id") == "N/A"):
+            v["trip_id"] = chosen["trip_id"]
+
         # CAPOLINEA DI DESTINAZIONE: la fonte piu' affidabile e' l'ULTIMA
         # fermata della sequenza della corsa (stop_times GTFS-Static). Per
         # alcune corse varianti GTT pubblica l'origine come headsign (verificato
