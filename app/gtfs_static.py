@@ -120,6 +120,8 @@ class GtfsStaticManager:
         self._trip_routes: dict = {}   # trip_id -> route_id GTFS (per coerenza linea-corsa)
         self._zip_bytes: bytes = b""    # pacchetto GTFS-Static in cache (per stop_times)
         self._trip_sequences: dict = {} # trip_id -> [(secondi_dalla_mezzanotte, stop_id), ...]
+        self._trip_shapes: dict = {}   # trip_id -> shape_id (geometria ufficiale del percorso)
+        self._shapes: dict = {}        # shape_id -> [(lat, lon), ...] ordinati per sequenza
         self._cache_loaded_at: float = 0.0
         self._cache_source: str = "fallback"
         self._lock = asyncio.Lock()
@@ -227,6 +229,17 @@ class GtfsStaticManager:
         """Sequenze fermate per corsa: trip_id -> [(secondi, stop_id), ...]."""
         return self._trip_sequences
 
+    def get_trip_shape(self, trip_id: str) -> list:
+        """Geometria UFFICIALE del percorso di una corsa: [(lat, lon), ...].
+
+        Dal GTFS-Static (shapes.txt): serve al controllo di aderenza alla
+        linea. Lista vuota se la corsa non ha una shape nota.
+        """
+        if not self._is_cache_fresh():
+            return []
+        shape_id = self._trip_shapes.get(str(trip_id or "").strip()) or ""
+        return self._shapes.get(shape_id) or []
+
     def get_trip_headsigns(self) -> dict:
         """Headsign per corsa (trips.txt GTT). ATTENZIONE: per alcune corse
         varianti GTT pubblica l'origine anziche' la destinazione: usare
@@ -321,6 +334,8 @@ class GtfsStaticManager:
                 self._stops_cache = routes.get("stops", {})
                 self._trip_headsigns = routes.get("trip_headsigns", {})
                 self._trip_routes = routes.get("trip_routes", {})
+                self._trip_shapes = routes.get("trip_shapes", {})
+                self._shapes = routes.get("shapes", {})
                 self._zip_bytes = routes.get("zip_bytes", b"")
                 self._cache_loaded_at = time.time()
                 self._cache_source = "gtfs-static-ufficiale"
@@ -369,6 +384,7 @@ class GtfsStaticManager:
                     # e' la vera indicazione di direzione verso il terminale.
                     trip_headsigns = {}
                     trip_routes = {}
+                    trip_shapes = {}
                     if "trips.txt" in z.namelist():
                         try:
                             trips_content = z.read("trips.txt").decode("utf-8-sig")
@@ -380,8 +396,33 @@ class GtfsStaticManager:
                                 trip_route = (trow.get("route_id") or "").strip()
                                 if tid and trip_route:
                                     trip_routes[tid] = trip_route
+                                shape_id = (trow.get("shape_id") or "").strip()
+                                if tid and shape_id:
+                                    trip_shapes[tid] = shape_id
                         except Exception as exc:
                             logger.warning("trips.txt non leggibile (%s): capolinei non disponibili.", exc)
+                    # Geometria UFFICIALE dei percorsi (shapes.txt): serve al
+                    # controllo di aderenza alla linea (un mezzo deve stare sul
+                    # suo percorso, o su una deviazione attiva, mai altrove).
+                    shapes = {}
+                    if "shapes.txt" in z.namelist():
+                        try:
+                            sh_rows = csv.DictReader(z.read("shapes.txt").decode("utf-8-sig").splitlines())
+                            for srow in sh_rows:
+                                sid = (srow.get("shape_id") or "").strip()
+                                if not sid:
+                                    continue
+                                try:
+                                    seq = int(float(srow.get("shape_pt_sequence") or 0))
+                                except (TypeError, ValueError):
+                                    continue
+                                shapes.setdefault(sid, []).append(
+                                    (seq, float(srow.get("shape_pt_lat") or 0), float(srow.get("shape_pt_lon") or 0))
+                                )
+                            shapes = {sid: [(lat, lon) for _s, lat, lon in sorted(pts)]
+                                      for sid, pts in shapes.items()}
+                        except Exception as exc:
+                            logger.warning("shapes.txt non leggibile (%s): controllo aderenza percorsi limitato.", exc)
                     stops = {}
                     if "stops.txt" in z.namelist():
                         try:
@@ -433,6 +474,8 @@ class GtfsStaticManager:
                         "stops": stops,
                         "trip_headsigns": trip_headsigns,
                         "trip_routes": trip_routes,
+                        "trip_shapes": trip_shapes,
+                        "shapes": shapes,
                         "zip_bytes": response.content,
                     }
             except Exception as exc:
