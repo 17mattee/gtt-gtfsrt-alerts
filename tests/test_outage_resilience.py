@@ -21,10 +21,12 @@ from app import gtt_full_sync, vehicles_scraper
 from app.gtt_full_sync import (
     OUTAGE_FLEET_TTL_S,
     SNAPSHOT_MAX_AGE_S,
+    STALE_FEED_GRACE_SECONDS,
     _remember_good_fleet,
     _resolve_trip_routes,
     _save_snapshot_to_disk,
     _serve_outage_fleet,
+    _filter_fresh_positions,
     load_last_good_snapshot,
 )
 
@@ -142,3 +144,36 @@ def test_snapshot_stantio_non_si_ripristina(tmp_path, monkeypatch):
              "data": {"vehicles": [{"vehicle_id": "9001U"}], "meta": {}}}
     (tmp_path / "last_good_snapshot.json").write_text(json.dumps(stale), encoding="utf-8")
     assert load_last_good_snapshot() is False
+
+
+def test_filtro_freschezza_finestra_rilassata_per_feed_stantio():
+    """Un fix di 5 minuti col filtro standard e' nascosto; con la finestra
+    rilassata del feed stantio di massa resta visibile (UI: 'GPS datato')."""
+    now = time.time()
+    v5min = {"vehicle_id": "9001U", "latitude": 45.0, "longitude": 7.6,
+             "timestamp": now - 300}
+    assert _filter_fresh_positions([v5min], now) == []  # default: troppo datato
+    kept = _filter_fresh_positions([v5min], now, max_age=STALE_FEED_GRACE_SECONDS)
+    assert len(kept) == 1, "feed stantio di massa: il mezzo resta in mappa"
+    # il futuro corrotto resta sempre escluso, anche con la finestra rilassata
+    vfuturo = dict(v5min, vehicle_id="9002U", timestamp=now + 3600)
+    assert _filter_fresh_positions([vfuturo], now, max_age=STALE_FEED_GRACE_SECONDS) == []
+
+
+
+def test_buffer_outage_caso_feed_degradato():
+    """Feed RAGGIUNGIBILE ma senza posizioni fresche, con centinaia di corse
+    attive: la citta' e' piena di bus, la mappa non puo' svuotarsi."""
+    vehicles_scraper.last_fetch_source = "live"
+    try:
+        gtt_full_sync._last_good_fleet = [{"vehicle_id": "9001U", "timestamp": time.time()}]
+        gtt_full_sync._last_good_fleet_at = time.time()
+        served, from_buffer = _serve_outage_fleet([], trips_active=400)
+        assert from_buffer is True and served[0]["vehicle_id"] == "9001U"
+        # notte con poco servizio (pocoe corse attive): dato reale, nessun buffer
+        served, from_buffer = _serve_outage_fleet([], trips_active=5)
+        assert from_buffer is False and served == []
+    finally:
+        gtt_full_sync._last_good_fleet = []
+        gtt_full_sync._last_good_fleet_at = 0.0
+        vehicles_scraper.last_fetch_source = "unknown"

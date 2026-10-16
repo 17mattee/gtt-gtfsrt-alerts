@@ -65,18 +65,24 @@ VEHICLE_GRACE_SECONDS = 120
 # POLITICA FRESCHEZZA (esplicita, voluta): sulla mappa si mostra SOLO dove i
 # mezzi SONO adesso. Un fix GPS piu' vecchio di 2 minuti non viene mostrato
 # (mai posizioni datate spacciate per attuali), e nemmeno fix con timestamp
-# NEL FUTURO (feed GTT corrotto: verificato dal vivo il 13/10/2026, un'entita'
-# col timestamp a +49 minuti). Blip GPS di 1-2 cicli: coperti dalla grazia
-# normale di isteresi; outage piu' lunghi: mappa vuota e status bar onesta.
+# NEL FUTURO (feed GTT corrotto: verificato dal vivo il 13/10/2026, entita'
+# col timestamp a +49 minuti e oggi anche a +29 ORE). Blip GPS di 1-2 cicli:
+# coperti dalla grazia normale di isteresi; outage piu' lunghi: buffer outage.
+# ECCEZIONE FEED STANTIO DI MASSA: se la MEDIANA dei fix pubblicati e' essa
+# stessa oltre l'eta' massima, non e' un mezzo glitchato: e' GTT che pubblica
+# in ritardo TUTTA la flotta. Svuotare la mappa mentre i bus girano per
+# strada sarebbe peggio che mostrarli: in quel caso la finestra si allarga a
+# STALE_FEED_GRACE_SECONDS, con la UI che marca ogni fix «GPS datato».
 MAX_GPS_AGE_SECONDS = 120
 MAX_GPS_FUTURE_SECONDS = 90
+STALE_FEED_GRACE_SECONDS = 600
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
-def _filter_fresh_positions(vehicles: list, now: float = None) -> list:
+def _filter_fresh_positions(vehicles: list, now: float = None, max_age: float = MAX_GPS_AGE_SECONDS) -> list:
     """Solo mezzi col fix GPS REALE e RECENTE: mai niente di datato o impossibile."""
     now = time.time() if now is None else now
-    min_ts = now - MAX_GPS_AGE_SECONDS
+    min_ts = now - max_age
     max_ts = now + MAX_GPS_FUTURE_SECONDS
     return [v for v in vehicles if min_ts <= (v.get("timestamp") or 0) <= max_ts]
 
@@ -353,19 +359,31 @@ def _map_scraped_alert(raw: dict, idx: int) -> dict:
     }
 
 
-def _serve_outage_fleet(vehicles: list) -> tuple:
-    """Feed posizioni GIU': serve l'ultima flotta reale nota, marcata 'cached'.
+def _serve_outage_fleet(vehicles: list, trips_active: int = 0) -> tuple:
+    """Feed posizioni GIU' o DEGRADATO: serve l'ultima flotta reale nota ('cached').
 
     Ritorna (flotta, dal_buffer). Nessuna finzione: oltre il TTL la flotta e'
     vuota con sorgente 'unavailable' (dato reale), e i mezzi serviti dal
     buffer restano i loro fix GPS originali: la UI li marca 'GPS datato'.
+
+    Due casi, entrambi difesi dal buffer:
+    - feed NON RAGGIUNGIBILE ('unavailable'): outage classico;
+    - feed raggiungibile ma SVUOTATO dal filtro freschezza mentre decine di
+      corse sono attive: GTT ha smesso di pubblicare posizioni fresche ma i
+      bus girano (misurato dal vivo: 464 corse attive, 0 posizioni). Con
+      una citta' piena di bus la mappa NON puo' risultare vuota.
     """
-    if vehicles or getattr(vehicles_scraper, "last_fetch_source", "") != "unavailable":
+    if vehicles:
+        return vehicles, False
+    feed_down = getattr(vehicles_scraper, "last_fetch_source", "") == "unavailable"
+    degraded = trips_active >= 50
+    if not (feed_down or degraded):
         return vehicles, False
     now = time.time()
     if _last_good_fleet and (now - _last_good_fleet_at) <= OUTAGE_FLEET_TTL_S:
         age = int(now - _last_good_fleet_at)
-        print(f"🔌 [SYNC] Feed posizioni GTT offline: servo l'ultima flotta reale nota "
+        causa = "offline" if feed_down else "degradato (nessuna posizione fresca)"
+        print(f"🔌 [SYNC] Feed posizioni GTT {causa}: servo l'ultima flotta reale nota "
               f"({len(_last_good_fleet)} mezzi di {age}s fa, max {OUTAGE_FLEET_TTL_S}s), marcata 'cached'.")
         return [dict(v) for v in _last_good_fleet], True
     return vehicles, False
@@ -529,23 +547,35 @@ async def _fetch_all_gtt_data_inner() -> dict:
     # in strada cambia SOLO per fatti reali (nuova uscita, rientro al deposito),
     # mai per un ciclo GPS perso del feed GTT.
     raw_vehicle_count = len(vehicles)
+    # Rilevamento del FEED STANTIO DI MASSA: se la mediana dei fix pubblicati
+    # e' lei stessa oltre i 120s, non sono mezzi glitchati: GTT sta pubblicando
+    # in ritardo tutta la flotta. La finestra di freschezza si allarga per questo
+    # ciclo (la UI marca comunque ogni fix «GPS datato»): svuotare la mappa
+    # mentre i bus girano sarebbe peggiore che mostrarli con l'eta' dichiarata.
+    now_cycle = time.time()
+    feed_ages = sorted(now_cycle - v["timestamp"] for v in vehicles if v.get("timestamp"))
+    cycle_max_age = (STALE_FEED_GRACE_SECONDS
+                     if feed_ages and feed_ages[len(feed_ages) // 2] > MAX_GPS_AGE_SECONDS
+                     else MAX_GPS_AGE_SECONDS)
     # Un fix DATATO pubblicato dal feed NON deve rinfrescare il timer di grazia:
     # un mezzo che pubblica solo posizioni vecchie resta in memoria per la
     # grazia e poi esce, invece di esservi trattenuto per sempre.
-    vehicles = _filter_fresh_positions(vehicles)
+    vehicles = _filter_fresh_positions(vehicles, now_cycle, cycle_max_age)
     vehicles = _apply_fleet_hysteresis(vehicles)
     # POLITICA 'NIENTE DATATO' (richiesta esplicita): sulla mappa si mostra
-    # SOLO dove i mezzi sono adesso. Fix piu' vecchio di 2 minuti: non mostrato.
-    # Timestamp dal futuro (feed GTT corrotto, visto dal vivo): non mostrato.
-    # I mezzi tolti restano in memoria (isteresi): tornano appena riappare un
-    # fix fresco, senza attendere nuove uscite dal feed.
-    vehicles = _filter_fresh_positions(vehicles)
+    # SOLO dove i mezzi sono adesso. Fix piu' vecchio della finestra: non
+    # mostrato. Timestamp dal futuro (feed GTT corrotto, visto dal vivo, oggi
+    # anche a +29 ore): non mostrato. I mezzi tolti restano in memoria
+    # (isteresi): tornano appena riappare un fix fresco.
+    vehicles = _filter_fresh_positions(vehicles, now_cycle, cycle_max_age)
     if len(vehicles) != raw_vehicle_count:
         print(f"🚌 [SYNC] Flotta con isteresi: {raw_vehicle_count} pubblicati ora, "
               f"{len(vehicles)} in strada (GPS datato entro {VEHICLE_GRACE_SECONDS}s incluso).")
 
-    # BUFFER OUTAGE: feed posizioni giu' -> ultima flotta reale nota ('cached')
-    vehicles, fleet_from_buffer = _serve_outage_fleet(vehicles)
+    # BUFFER OUTAGE: feed posizioni giu' o degradato -> ultima flotta reale
+    # nota ('cached'); 'degradato' = feed raggiungibile ma senza posizioni
+    # fresche mentre decine di corse sono attive (misurato dal vivo).
+    vehicles, fleet_from_buffer = _serve_outage_fleet(vehicles, trip_vehicle_count)
     # La flotta appena vista dal feed alimenta la memoria del buffer outage.
     _remember_good_fleet(vehicles, fleet_from_buffer)
 
