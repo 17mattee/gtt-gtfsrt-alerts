@@ -1,7 +1,7 @@
 gtfs-realtime-bindings>=3.0.0
 requests>=2.31.0
 beautifulsoup4>=4.15.0
-fastapi>=0.100.0
+fastapi>=0.143.0
 uvicorn>=0.54.0
 httpx>=0.28.1
 supabase>=2.0.0
