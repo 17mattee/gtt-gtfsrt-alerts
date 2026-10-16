@@ -665,6 +665,12 @@ def _mark_depot_returns(vehicles: list) -> int:
         trips = (sched or {}).get("trips") or []
         if trips and trips[-1] == tid:
             v["rientro_deposito"] = True
+            if v.get("fuori_percorso"):
+                # Fuori percorso SPIEGATO: terminata la corsa, il mezzo corre al
+                # deposito su un itinerario che non e' il tratto di linea
+                # (misurato dal vivo: 4 mezzi fuori percorso su 6 erano tutti
+                # in rientro, es. tram linea 4 verso il deposito Drosso).
+                v["fuori_percorso"]["motivo"] = "rientro_deposito"
             marked += 1
     return marked
 
