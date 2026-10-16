@@ -11,6 +11,7 @@ Garanzie:
 import asyncio
 import json
 import math
+import os
 import re
 import logging
 import time
@@ -48,14 +49,22 @@ SEQUENCE_REFRESH_INTERVAL = 600  # secondi: nuove corse ottengono le fermate ogn
 #    (deploi, crash del worker): il cold start parte con i dati reali invece
 #    che a zero. File atomico (write + rename), mai bloccante, mai fatale.
 # ----------------------------------------------------------------------------
-OUTAGE_FLEET_TTL_S = 600
-SNAPSHOT_MAX_AGE_S = 900
+# TTL configurabili via env: su Render free un outage GTT lungo non deve
+# svuotare la mappa prima del necessario, ma nemmeno servire dati stantii
+# oltre il senso fisico (il passeggero preferisce un po' di storia onesta
+# a una mappa vuota, entro limiti ragionevoli).
+OUTAGE_FLEET_TTL_S = float(os.getenv("OUTAGE_FLEET_TTL_S", "600"))
+SNAPSHOT_MAX_AGE_S = float(os.getenv("SNAPSHOT_MAX_AGE_S", "900"))
 SNAPSHOT_WRITE_INTERVAL_S = 30
+# Frequenza del salvataggio dello stato su Supabase (piu' raro del disco:
+# un upsert JSONB da ~500KB ogni 30s e' inutile carico sul free tier).
+STATE_CLOUD_WRITE_INTERVAL_S = float(os.getenv("STATE_CLOUD_WRITE_SECONDS", "300"))
 _SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "gtfs_data"
 _SNAPSHOT_FILE = _SNAPSHOT_DIR / "last_good_snapshot.json"
 _last_good_fleet: list = []
 _last_good_fleet_at: float = 0.0
 _last_snapshot_write_at: float = 0.0
+_last_state_cloud_write_at: float = 0.0
 
 # ISTERESI FLOTTA: il feed posizioni GTT fa "lampeggiare" i mezzi — un mezzo
 # puo' sparire per uno-due cicli GPS (20-60s) e tornare, facendo oscillare il
@@ -89,6 +98,17 @@ ESTIMATE_MAX_NEXT_STOP_S = 900
 # di strada senza falsi positivi. Oltre: il mezzo e' dichiarato fuori
 # percorso, con l'eventuale deviazione attiva della linea.
 OFF_ROUTE_THRESHOLD_M = 200
+# Soglia per tipo di mezzo: tram (0), metro (1) e funicolare (7) viaggiano su
+# infrastruttura FISSA (rotaia): bastano 75m per dichiararli fuori percorso
+# (misurato sul feed reale: p99 41m; un tram a 75m dalla propria rotaia e'
+# fuori, non e' rumore GPS). I bus tollerano 200m (deviazioni corte di
+# isolato, canyon urbano).
+FIXED_TRACK_OFF_ROUTE_M = 75
+# Deviazione NON ANNUNCIATA da GTT, dedotta dalla FLOTTA: se almeno N mezzi
+# della STESSA linea sono contemporaneamente fuori percorso senza spiegazione
+# (nessuna deviazione annunciata, nessun rientro al deposito), non e' rumore
+# GPS isolato: e' la linea che sta girando altrove e GTT non l'ha detto.
+UNANNOUNCED_DETOUR_MIN_VEHICLES = 3
 _recent_vehicles: dict = {}  # vehicle_id -> {"data": dict, "seen_at": epoch}
 
 
@@ -461,8 +481,20 @@ def _estimate_unpublished_vehicles(trip_updates: list, vehicles: list, trip_sequ
             frac = min(1.0, max(0.0, 1.0 - remaining / seg))
             plat = prev.get("lat") if prev.get("lat") else nxt["lat"]
             plon = prev.get("lon") if prev.get("lat") else nxt["lon"]
-            lat = plat + (nxt["lat"] - plat) * frac
-            lon = plon + (nxt["lon"] - plon) * frac
+            lat = lon = None
+            # STIMA LUNGO LA GEOMETRIA UFFICIALE: la posizione segue la shape
+            # reale della linea (curve comprese), non la linea d'aria tra le
+            # due fermate che taglierebbe i palazzi.
+            shape = gtfs_manager.get_trip_shape(tid)
+            if shape and len(shape) >= 2:
+                i_prev = _nearest_shape_index(shape, plat, plon)
+                i_next = _nearest_shape_index(shape, nxt["lat"], nxt["lon"])
+                if i_prev is not None and i_next is not None and i_prev < i_next:
+                    lat, lon = _point_along_shape(shape, i_prev, i_next, frac)
+            if lat is None:
+                # Nessuna shape (o proiezione incoerente): linea retta tra fermate.
+                lat = plat + (nxt["lat"] - plat) * frac
+                lon = plon + (nxt["lon"] - plon) * frac
         known.add(vid)
         stop_name = nxt.get("name") or stop_id
         m = re.match(r"Fermata\s+\d+\s*-\s*(.+)$", stop_name)
@@ -536,8 +568,16 @@ def _resolve_trip_routes(trip_updates: list, vehicles: list) -> None:
 
 
 def _save_snapshot_to_disk(result: dict) -> None:
-    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale."""
-    global _last_snapshot_write_at
+    """Persiste l'ultimo sync BUONO (mai con flotta vuota). Best effort, mai fatale.
+
+    Due destinazioni complementari:
+    - DISCO (gtfs_data/, atomica, ogni 30s): veloce, sopravvive ai riavvii
+      del worker, MA il disco del free tier e' effimero tra i deploy;
+    - SUPABASE (tabella gtt_system_state, ogni STATE_CLOUD_WRITE_INTERVAL_S):
+      sopravvive anche ai deploy: il cold start durante un outage GTT parte
+      con i dati reali in ogni caso.
+    """
+    global _last_snapshot_write_at, _last_state_cloud_write_at
     now = time.time()
     if now - _last_snapshot_write_at < SNAPSHOT_WRITE_INTERVAL_S:
         return
@@ -552,23 +592,55 @@ def _save_snapshot_to_disk(result: dict) -> None:
         tmp.replace(_SNAPSHOT_FILE)  # scrittura atomica: mai uno snapshot a meta'
     except Exception as exc:
         logger.warning("Snapshot su disco non salvabile (%s): continuo senza.", exc)
+    if now - _last_state_cloud_write_at >= STATE_CLOUD_WRITE_INTERVAL_S:
+        _last_state_cloud_write_at = now
+        try:
+            from app.database_writer import SYSTEM_STATE_KEY, save_state_to_supabase
+            save_state_to_supabase(SYSTEM_STATE_KEY, payload)
+        except Exception as exc:
+            logger.warning("Stato su Supabase non salvabile (%s): continuo col solo disco.", exc)
+
+
+def _read_disk_snapshot():
+    """Legge lo snapshot da disco (payload completo) o None. Mai eccezioni."""
+    try:
+        if not _SNAPSHOT_FILE.exists():
+            return None
+        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        if payload.get("saved_at") and (payload.get("data") or {}).get("vehicles"):
+            return payload
+    except Exception as exc:
+        logger.warning("Snapshot su disco non leggibile (%s).", exc)
+    return None
 
 
 def load_last_good_snapshot() -> bool:
     """Cold start: ripristina l'ultimo snapshot buono se abbastanza fresco.
 
-    Seeda lo snapshot globale (la UI parte con dati reali mentre il primo sync
-    live gira in background) e il buffer outage. Le sorgenti nel meta vengono
-    dichiarate 'cached': nessun dato ripristinato si spaccia per live.
+    Cerca su DISCO e su SUPABASE e usa il PIU' FRESCO: il disco e' veloce,
+    ma dopo un deploy e' vuoto (free tier effimero) e lo stato cloud salva
+    il cold start durante un outage GTT. Seeda lo snapshot globale (la UI
+    parte con dati reali mentre il primo sync live gira in background) e il
+    buffer outage. Le sorgenti nel meta vengono dichiarate 'cached': nessun
+    dato ripristinato si spaccia per live.
     """
     global _last_good_fleet, _last_good_fleet_at
+    payload = _read_disk_snapshot()
+    origine = "disco"
     try:
-        if not _SNAPSHOT_FILE.exists():
-            return False
-        payload = json.loads(_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        from app.database_writer import SYSTEM_STATE_KEY, load_state_from_supabase
+        cloud = load_state_from_supabase(SYSTEM_STATE_KEY)
+    except Exception:
+        cloud = None
+    if cloud and cloud.get("saved_at") and (cloud.get("data") or {}).get("vehicles"):
+        if not payload or float(cloud.get("saved_at") or 0) > float(payload.get("saved_at") or 0):
+            payload, origine = cloud, "Supabase"
+    if not payload:
+        return False
+    try:
         saved_at = float(payload.get("saved_at") or 0)
         data = payload.get("data") or {}
-        if not data.get("vehicles") or (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
+        if (time.time() - saved_at) > SNAPSHOT_MAX_AGE_S:
             return False
         meta = dict(data.get("meta") or {})
         for key in ("vehicles_source", "alerts_source", "trip_updates_source"):
@@ -578,11 +650,21 @@ def load_last_good_snapshot() -> bool:
         network_snapshot.update(data)
         _last_good_fleet = [dict(v) for v in data["vehicles"]]
         _last_good_fleet_at = saved_at
-        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono "
+        print(f"💾 [SYNC] Cold start: ripristinato l'ultimo snapshot buono dal {origine} "
               f"({len(data['vehicles'])} mezzi di {int(time.time() - saved_at)}s fa, sorgente 'cached').")
+        if origine == "Supabase":
+            # Riscrivi su disco: il prossimo avvio sara' veloce (no rete).
+            try:
+                _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = _SNAPSHOT_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+                tmp.replace(_SNAPSHOT_FILE)
+            except Exception:
+                pass
         return True
     except Exception as exc:
-        logger.warning("Snapshot su disco non leggibile (%s): cold start normale.", exc)
+        logger.warning("Snapshot non ripristinabile (%s): cold start normale.", exc)
+        return False
         return False
 
 
@@ -617,6 +699,57 @@ def _distance_to_polyline_m(lat, lon, points) -> float:
     return math.sqrt(best_sq)
 
 
+def _nearest_shape_index(points, lat, lon):
+    """Indice del punto della polilinea piu' vicino (proiezione euristica)."""
+    if not points or lat is None or lon is None:
+        return None
+    r = 6371000.0
+    kx = math.cos(math.radians(45.07)) * math.pi / 180.0 * r
+    ky = math.pi / 180.0 * r
+    x, y = lon * kx, lat * ky
+    best_i, best_d = None, None
+    for i, (la, lo) in enumerate(points):
+        d = (x - lo * kx) ** 2 + (y - la * ky) ** 2
+        if best_d is None or d < best_d:
+            best_i, best_d = i, d
+    return best_i
+
+
+def _point_along_shape(points, i_from, i_to, frac):
+    """Punto sulla polilinea a frazione 'frac' del percorso tra i_from e i_to.
+
+    La stima segue la GEOMETRIA UFFICIALE della linea (shapes.txt), non la
+    linea d'aria tra le fermate: un mezzo stimato a meta' strada tra due
+    fermate sta sulla strada vera (curve comprese), non dentro i palazzi.
+    """
+    if i_to <= i_from:
+        return points[i_from]
+    r = 6371000.0
+    kx = math.cos(math.radians(45.07)) * math.pi / 180.0 * r
+    ky = math.pi / 180.0 * r
+    seglen = []
+    total = 0.0
+    for i in range(i_from, i_to):
+        ax, ay = points[i][1] * kx, points[i][0] * ky
+        bx, by = points[i + 1][1] * kx, points[i + 1][0] * ky
+        d = math.hypot(bx - ax, by - ay)
+        seglen.append(d)
+        total += d
+    if total <= 0:
+        return points[i_from]
+    target = max(0.0, min(1.0, frac)) * total
+    walked = 0.0
+    for i, d in enumerate(seglen):
+        if walked + d >= target or i == len(seglen) - 1:
+            t = 0.0 if d <= 0 else (target - walked) / d
+            t = max(0.0, min(1.0, t))
+            la1, lo1 = points[i_from + i]
+            la2, lo2 = points[i_from + i + 1]
+            return (la1 + (la2 - la1) * t, lo1 + (lo2 - lo1) * t)
+        walked += d
+    return points[i_to]
+
+
 def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
     """Ogni mezzo GPS deve stare sul suo percorso ufficiale (o deviato).
 
@@ -627,6 +760,7 @@ def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
     percorso per costruzione: nessun controllo necessario.
     """
     flagged = 0
+    route_types = gtfs_manager.get_route_types()
     for v in vehicles:
         if v.get("position_source") == "stimata":
             continue
@@ -636,8 +770,11 @@ def _check_route_adherence(vehicles: list, detour_routes: set) -> int:
         pts = gtfs_manager.get_trip_shape(tid)
         if not pts:
             continue
+        # Soglia per tipo: su rotaia bastano 75m, i bus 200m.
+        rtype = route_types.get(v.get("route_id"), 3)
+        threshold = FIXED_TRACK_OFF_ROUTE_M if rtype in (0, 1, 7) else OFF_ROUTE_THRESHOLD_M
         d = _distance_to_polyline_m(v.get("latitude"), v.get("longitude"), pts)
-        if d <= OFF_ROUTE_THRESHOLD_M:
+        if d <= threshold:
             continue
         v["fuori_percorso"] = {
             "distanza_m": int(d),
@@ -673,6 +810,33 @@ def _mark_depot_returns(vehicles: list) -> int:
                 v["fuori_percorso"]["motivo"] = "rientro_deposito"
             marked += 1
     return marked
+
+
+def _detect_unannounced_detours(vehicles: list) -> list:
+    """Deviazioni che GTT NON ha annunciato, dedotte dalla FLOTTA.
+
+    Se almeno UNANNOUNCED_DETOUR_MIN_VEHICLES mezzi della STESSA linea sono
+    contemporaneamente fuori percorso senza spiegazione (nessuna deviazione
+    annunciata, nessun rientro al deposito), non e' rumore GPS isolato: e'
+    la linea che sta girando altrove. Ogni mezzo coinvolto viene marcato
+    'deviazione_rilevata' col numero di mezzi coinvolti: il passeggero vede
+    subito che il suo bus e' deviato ANCHE se GTT non ha pubblicato l'avviso.
+    """
+    per_route = {}
+    for v in vehicles:
+        fp = v.get("fuori_percorso")
+        if not fp or fp.get("deviazione_attiva") or fp.get("motivo"):
+            continue
+        per_route.setdefault(v.get("route_id"), []).append(v)
+    found = []
+    for route, vs in sorted(per_route.items(), key=lambda kv: str(kv[0])):
+        if len(vs) < UNANNOUNCED_DETOUR_MIN_VEHICLES:
+            continue
+        for v in vs:
+            v["fuori_percorso"]["motivo"] = "deviazione_rilevata"
+            v["fuori_percorso"]["mezzi_coinvolti"] = len(vs)
+        found.append((route, len(vs)))
+    return found
 
 
 async def _fetch_all_gtt_data_inner() -> dict:
@@ -1109,9 +1273,16 @@ async def _fetch_all_gtt_data_inner() -> dict:
               f"ufficiale: dichiarati fuori percorso (deviazione attiva o posizione insolita).")
 
     # RIENTRO AL DEPOSITO: mezzi all'ultima corsa del proprio blocco-corse.
+    # PRIMA del rilevatore: un fuori-percorso spiegato dal rientro non deve
+    # contare come indizio di deviazione non annunciata.
     depot = _mark_depot_returns(result["vehicles"])
     if depot:
         print(f"🏚️ [SYNC] {depot} mezzi all'ultima corsa del proprio blocco: probabile rientro al deposito.")
+
+    # Deviazioni NON annunciate dedotte dalla flotta (>= 3 mezzi della stessa
+    # linea fuori percorso senza spiegazione).
+    for route, n in _detect_unannounced_detours(result["vehicles"]):
+        print(f"🗺️ [SYNC] Probabile deviazione NON annunciata sulla linea {route}: {n} mezzi fuori percorso.")
 
     # SCIOPERI & EVENTI: doppia fonte con interscambio.
     # - UFFICIALI: avvisi GTT con causa sciopero (GTFS-RT Cause.STRIKE = 4)

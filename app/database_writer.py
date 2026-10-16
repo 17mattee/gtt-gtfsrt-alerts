@@ -56,6 +56,43 @@ def _epoch_to_iso(value) -> str | None:
     return None
 
 
+# --- STATO DI SISTEMA PERSISTENTE (anti-crash GTT) ---------------------------
+# Lo snapshot dell'ultimo sync buono vive su disco (gtfs_data/), ma il disco
+# del piano free di Render e' effimero tra i deploy: lo stato su Supabase
+# sopravvive a TUTTO (deploy, crash del worker, cambio istanza) e il cold
+# start durante un outage GTT parte comunque con i dati reali.
+
+SYSTEM_STATE_KEY = "last_good_snapshot"
+
+
+def save_state_to_supabase(key: str, payload: dict) -> bool:
+    """Persiste un blob di stato (JSON) su Supabase. Best effort, mai eccezioni."""
+    if not supabase:
+        return False
+    try:
+        supabase.table("gtt_system_state").upsert(
+            {"key": key, "payload": payload, "saved_at": _now_iso()},
+            on_conflict="key",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.warning(f"Stato di sistema non salvabile su Supabase ({key}): {exc}")
+        return False
+
+
+def load_state_from_supabase(key: str):
+    """Legge un blob di stato da Supabase: {'payload': ...} o None."""
+    if not supabase:
+        return None
+    try:
+        res = supabase.table("gtt_system_state").select("payload").eq("key", key).limit(1).execute()
+        rows = (res.data or [])
+        return rows[0].get("payload") if rows else None
+    except Exception as exc:
+        logger.warning(f"Stato di sistema non leggibile da Supabase ({key}): {exc}")
+        return None
+
+
 def _batched(seq, size=500):
     """Supabase accetta batch limitati: suddividiamo gli insert grandi."""
     for i in range(0, len(seq), size):
