@@ -1,4 +1,3 @@
-import os
 import hashlib
 import requests
 from bs4 import BeautifulSoup

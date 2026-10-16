@@ -1,6 +1,5 @@
 import subprocess
 import sys
-import os
 
 def run_command(cmd, description):
     print(f"\n[AUDIT] 🚀 {description}...")
