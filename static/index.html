@@ -59,6 +59,9 @@
         .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
         .tab-btn { flex: 1; padding: 12px 4px; background: none; border: none; color: var(--text-2); font-weight: 600; font-size: 0.85rem; cursor: pointer; border-bottom: 2px solid transparent; }
         .tab-btn.active { color: var(--text); border-bottom-color: var(--logo); }
+        /* Desktop: etichette complete; su smartphone la media query sotto
+           sostituisce le lunghe con le compatte (barra tab sottile) */
+        .tab-btn .lbl-short { display: none; }
 
         .lines-panel { border-bottom: 1px solid var(--border-soft); padding: 12px 16px 13px; flex-shrink: 0; }
         .lines-panel .group-label { font-size: 0.6rem; color: var(--text-3); font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; margin: 10px 0 6px; }
@@ -151,15 +154,15 @@
         /* ---------- Smartphone ---------- */
         @media (max-width: 820px) {
             /* Header: compatto, due righe (brand + KPI scorrevoli) */
-            header { height: auto; flex-wrap: wrap; padding: 7px 10px; gap: 4px 10px; }
-            .brand .mark { font-size: 0.8rem; padding: 5px 7px; }
+            header { height: auto; flex-wrap: wrap; padding: 5px 10px; gap: 2px 10px; }
+            .brand .mark { font-size: 0.8rem; padding: 4px 6px; }
             .brand h1 { font-size: 0.9rem; }
             .brand p { display: none; }
-            .kpis { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 14px; padding-bottom: 2px; }
+            .kpis { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 12px; padding-bottom: 0; }
             .kpis::-webkit-scrollbar { display: none; }
             .kpi { text-align: left; flex-shrink: 0; }
-            .kpi b { font-size: 0.95rem; }
-            .kpi label { font-size: 0.6rem; }
+            .kpi b { font-size: 0.88rem; }
+            .kpi label { font-size: 0.58rem; }
 
             /* Corpo: mappa sopra (40% dello schermo), pannello sotto con piu' spazio */
             main { flex-direction: column-reverse; }
@@ -169,36 +172,43 @@
             /* Statusbar nascosta quando tutto va bene (riga "Dati ufficiali…"):
                riappare da sola SOLO per problemi reali (feed, riconnessione, tiles). */
             .statusbar { display: none; }
-            .statusbar.important { display: flex; padding-bottom: calc(9px + env(safe-area-inset-bottom)); }
+            .statusbar.important { display: flex; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+
+            /* TAB SOTTLI: su ~390px quattro tab non stanno con le etichette
+               lunghe (andavano a capo raddoppiando l'altezza della barra):
+               su mobile si usano le etichette compatte (lbl-short) e il padding
+               e' ridotto al minimo leggibile. Tutto lo spazio recuperato va
+               all'elenco sottostante. */
+            .tab-btn { padding: 8px 2px; font-size: 0.76rem; white-space: nowrap; }
+            .tab-btn .lbl-full { display: none; }
+            .tab-btn .lbl-short { display: inline; }
 
             /* Selettore linee: UNA striscia orizzontale a scorrimento (un dito per
-               scorrere tutte le linee, zero spazio verticale rubato) */
-            .lines-panel { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 6px; padding: 9px 10px; scrollbar-width: none; max-height: none; border-bottom: 1px solid var(--border-soft); }
+               scorrere tutte le linee, zero spazio verticale rubato). Chip piu'
+               compatti: se ne vedono di piu' a colpo d'occhio. */
+            .lines-panel { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 5px; padding: 7px 8px; scrollbar-width: none; max-height: none; border-bottom: 1px solid var(--border-soft); }
             .lines-panel::-webkit-scrollbar { display: none; }
             .lines-panel .group-label { display: none; }
             .lines-panel .chip-row { display: contents; }
-            .chip { flex-shrink: 0; height: 34px; min-width: 44px; font-size: 0.84rem; border-radius: 8px; }
-            .chip.all-chip { flex-shrink: 0; padding: 0 12px; }
+            .chip { flex-shrink: 0; height: 30px; min-width: 38px; font-size: 0.78rem; border-radius: 7px; }
+            .chip.all-chip { flex-shrink: 0; padding: 0 10px; }
 
             /* Ricerca: input a 16px -> iOS NON fa l'auto-zoom al focus */
-            .filter-bar { padding: 8px 10px; }
-            .filter-bar input { font-size: 16px; padding: 11px 12px; border-radius: 8px; }
+            .filter-bar { padding: 6px 8px; }
+            .filter-bar input { font-size: 16px; padding: 9px 10px; border-radius: 8px; }
 
-            /* LEGGIBILITA' CARD: font piu' grandi, area di tocco >= 44px,
-               piu' respiro tra una card e l'altra, testo che va a capo */
-            .feed-section { padding: 10px 12px 18px; }
-            .card { padding: 11px 12px; margin-bottom: 8px; border-radius: 10px; min-height: 46px; }
+            /* LEGGIBILITA' CARD: font grandi, testo che va a capo, ma con
+               respiro tra le card RIDOTTO: una card in piu' sta nello schermo */
+            .feed-section { padding: 8px 10px 14px; }
+            .card { padding: 10px 11px; margin-bottom: 6px; border-radius: 9px; min-height: 42px; }
             .card strong { font-size: 0.9rem; }
             .card span { font-size: 0.82rem; line-height: 1.35; }
             .card .card-info { white-space: normal; text-align: right; }
-            .line-badge { min-width: 44px; height: 30px; font-size: 0.86rem; border-radius: 7px; }
-            .line-group-title { font-size: 0.7rem; margin: 16px 2px 8px; }
-            .card.alert, .card.detour { padding: 12px 13px; }
+            .line-badge { min-width: 40px; height: 28px; font-size: 0.84rem; border-radius: 7px; }
+            .line-group-title { font-size: 0.66rem; margin: 12px 2px 6px; }
+            .card.alert, .card.detour { padding: 11px 12px; }
             .card.alert strong, .card.detour strong { font-size: 0.92rem; }
             .card.alert span, .card.detour span { font-size: 0.84rem; line-height: 1.45; }
-
-            /* Tab piu' alte e leggibili col pollice */
-            .tab-btn { padding: 14px 4px; font-size: 0.92rem; }
 
             /* Popup della mappa mai piu' largo dello schermo */
             .leaflet-popup-content { max-width: 230px !important; }
@@ -232,8 +242,8 @@
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab('vehicles-tab', this)">Flotta</button>
                 <button class="tab-btn" onclick="switchTab('delays-tab', this)">Ritardi</button>
-                <button class="tab-btn" onclick="switchTab('alerts-tab', this)">Avvisi &amp; Deviazioni</button>
-                <button class="tab-btn" onclick="switchTab('strikes-tab', this)">Scioperi &amp; Eventi</button>
+                <button class="tab-btn" onclick="switchTab('alerts-tab', this)"><span class="lbl-full">Avvisi &amp; Deviazioni</span><span class="lbl-short">Avvisi</span></button>
+                <button class="tab-btn" onclick="switchTab('strikes-tab', this)"><span class="lbl-full">Scioperi &amp; Eventi</span><span class="lbl-short">Scioperi</span></button>
             </div>
 
             <div id="vehicles-tab" class="feed-section active">

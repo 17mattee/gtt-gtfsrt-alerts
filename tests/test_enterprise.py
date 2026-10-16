@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from google.transit import gtfs_realtime_pb2
-import os
 import docker
 
 client = TestClient(app)
