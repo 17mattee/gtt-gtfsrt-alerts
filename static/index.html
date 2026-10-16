@@ -136,6 +136,7 @@
         .veh-dot.d-late { background: #dc2626; }
         .veh-dot.d-nd { background: #6f6f6a; }
         .veh-dot.stale { opacity: .45; }
+        .veh-dot.est { border-style: dashed; opacity: .8; }
         .veh-arrow { position: absolute; top: -7px; left: 50%; margin-left: -3.5px; width: 0; height: 0;
                      border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
                      border-bottom: 7px solid #1a1a1a; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
@@ -577,7 +578,14 @@
                 html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + capTxt + '</div>';
             }
             html += '<div class="popup-row">' + fmtSpeed(v.speed) + '</div>';
-            html += '<div class="popup-row">' + (v.verifica === 'doppia_fonte'
+            // Posizione STIMATA: il mezzo ha una corsa attiva reale ma GTT non
+            // pubblica il suo GPS: va dichiarato, mai confuso con un fix GPS.
+            if (v.position_source === 'stimata') {
+                html += '<div class="popup-row" style="font-weight:600;color:#7c3aed;">Posizione stimata dall\'orario di corsa (GTT non pubblica il GPS di questo mezzo)</div>';
+            }
+            html += '<div class="popup-row">' + (v.position_source === 'stimata'
+                ? 'Corsa attiva confermata dal feed orari GTT'
+                : v.verifica === 'doppia_fonte'
                 ? 'Presenza confermata da GPS e orari di corsa (doppia fonte)'
                 : 'Tracciato dal solo GPS (corsa non nel feed orari)') + '</div>';
             html += '<div class="popup-row">Corsa ' + esc(v.trip_id || 'n/d') + '</div>';
@@ -672,6 +680,9 @@
 
                 const delay = v.delay_seconds;
                 const bearing = Number(v.bearing || 0);
+                // Mezzo a posizione STIMATA (corsa attiva, GPS non pubblicato):
+                // pallino tratteggiato, sempre distinguibile da un fix GPS.
+                const estimated = v.position_source === 'stimata';
                 // GPS datato oltre 2 minuti (raro): pallino attenuato, dato
                 // vecchio reso visibile, non nascosto.
                 const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
@@ -681,7 +692,7 @@
                     : delay <= 300 ? 'd-warn' : 'd-late';
                 const inner = `<div class="veh-inner"${bearing ? ` style="transform:rotate(${bearing}deg)"` : ''}>`
                     + (bearing ? `<span class="veh-arrow" style="border-bottom-color:${delayColor(delay)}"></span>` : '')
-                    + `<span class="veh-dot ${dotCls}${gpsStale ? ' stale' : ''}"></span></div>`;
+                    + `<span class="veh-dot ${dotCls}${gpsStale ? ' stale' : ''}${estimated ? ' est' : ''}"></span></div>`;
 
                 let marker = markersByVehicle[v.vehicle_id];
                 const curTs = Number(v.timestamp) || 0;
@@ -834,7 +845,7 @@
                     const gpsStale = v.timestamp && (Date.now() / 1000 - Number(v.timestamp)) > 120;
                     html += `<div class="card ${delayClass(v.delay_seconds)}" data-vehicle="${esc(v.vehicle_id)}">
                         <div style="flex:1;min-width:0;"><strong>Mezzo ${esc(v.vehicle_id)}${v.headsign ? ' → ' + esc(v.headsign) : ''}</strong></div>
-                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${v.capolinea ? (v.capolinea.stato === 'sosta' ? ' · in sosta al capolinea' : v.capolinea.stato === 'attesa_partenza' ? ' · in attesa alla partenza' : ' · in arrivo al capolinea') : ''}${gpsStale ? ' · GPS datato' : ''}</span>
+                        <span class="card-info">${fmtSpeed(v.speed)} · ${fmtDelay(v.delay_seconds)}${v.capolinea ? (v.capolinea.stato === 'sosta' ? ' · in sosta al capolinea' : v.capolinea.stato === 'attesa_partenza' ? ' · in attesa alla partenza' : ' · in arrivo al capolinea') : ''}${gpsStale ? ' · GPS datato' : ''}${v.position_source === 'stimata' ? ' · posizione stimata' : ''}</span>
                     </div>`;
                 }
             }
