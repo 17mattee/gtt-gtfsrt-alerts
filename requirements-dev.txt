@@ -2,5 +2,5 @@
 pytest>=9.1.1
 pytest-cov==7.1.0
 testcontainers[postgres,redis]==4.15.0
-locust>=2.20.0
+locust>=2.46.7
 pip-audit>=2.7.0
