@@ -338,21 +338,27 @@ async def fetch_gtt_trip_updates() -> list:
             delay = tu.delay if tu.HasField("delay") else None
             # PROSSIMA FERMATA: primo StopTimeUpdate con orario d'arrivo nel futuro,
             # con stop_id e orario previsto (per la precisione sull'arrivo reale).
+            # Per le corse 'solo-orari' (senza campo delay, solo arrival.time
+            # assoluti) si conservano TUTTE le previsioni del feed: il blocco
+            # di fermate consecutive e' cio' che permette l'allineamento senza
+            # ambiguita' sulla sequenza programmata del GTFS-Static.
             next_stop = None
+            arrival_times = []
             for stu in tu.stop_time_update:
                 if delay is None:
                     if stu.HasField("arrival") and stu.arrival.HasField("delay"):
                         delay = stu.arrival.delay
                     elif stu.HasField("departure") and stu.departure.HasField("delay"):
                         delay = stu.departure.delay
-                if next_stop is None:
-                    arr_ts = None
-                    if stu.HasField("arrival") and stu.arrival.time:
-                        arr_ts = stu.arrival.time
-                    elif stu.HasField("departure") and stu.departure.time:
-                        arr_ts = stu.departure.time
-                    if arr_ts and arr_ts >= now - 30:  # tolleranza 30s per dati al limite
-                        next_stop = {"stop_id": stu.stop_id, "arrival_ts": arr_ts}
+                stu_time = None
+                if stu.HasField("arrival") and stu.arrival.time:
+                    stu_time = stu.arrival.time
+                elif stu.HasField("departure") and stu.departure.time:
+                    stu_time = stu.departure.time
+                if stu_time:
+                    arrival_times.append(stu_time)
+                    if next_stop is None and stu_time >= now - 30:  # tolleranza 30s per dati al limite
+                        next_stop = {"stop_id": stu.stop_id, "arrival_ts": stu_time}
             # Standard GTFS-RT: trip tracciato senza campo delay = corsa che
             # sta rispettando l'orario programmato. Il ritardo e' quindi SEMPRE
             # disponibile per ogni corsa attiva (mai 'n/d').
@@ -365,6 +371,9 @@ async def fetch_gtt_trip_updates() -> list:
                 "vehicle_id": tu.vehicle.id if tu.HasField("vehicle") else None,
                 "delay_seconds": delay,
                 "next_stop": next_stop,
+                # Corse 'solo-orari': blocco di previsioni assolute del feed,
+                # base dell'allineamento su GTFS-Static (vedi gtt_full_sync).
+                "arrival_times": arrival_times,
                 # Nessun timestamp = corsa senza dato di aggiornamento: 0, mai
                 # un finto "adesso" che farebbe vincere questa entita' sulla
                 # corsa piu' recente nella scelta del ritardo del mezzo.

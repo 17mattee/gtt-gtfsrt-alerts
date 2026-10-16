@@ -260,28 +260,54 @@ def _predict_next_stop(sequence, delay_seconds, now=None):
     return best
 
 
-def _derive_delay_from_arrival(sequence, rt_arrival_ts, tolerance=300):
-    """Delay effettivo derivato per le corse GTT 'solo-orari'.
+def _derive_delay_from_arrival(sequence, feed_times, max_abs_delay=1800, max_spread=300):
+    """Delay effettivo per le corse GTT 'solo-orari' (previsioni assolute, senza delay).
 
-    GTT pubblica queste corse solo con orari d'arrivo previsti (senza campo
-    delay): il delay e' la distanza tra la previsione e l'orario PROGRAMMATTO
-    della fermata piu' vicina nella sequenza della corsa (GTFS-Static),
-    provando entrambe le mezzanotti locali (corse oltre mezzanotte).
-    Ritorna il delay in secondi o None se nessun match entro la tolleranza:
-    oltre, l'abbinamento fermata-per-fermata diventa ambiguo e il valore
-    standard GTFS-RT (in orario) resta piu' onesto di un numero a caso.
+    GTT pubblica per queste corse un BLOCCO di fermate consecutive con orari
+    d'arrivo assoluti. Si allinea l'intero blocco sulla sequenza programmata
+    (GTFS-Static, provando entrambe le mezzanotti locali per le corse oltre
+    mezzanotte): l'allineamento con residuo minimo individua senza ambiguita'
+    la posizione del blocco nella corsa, e il delay della PROSSIMA fermata
+    (la prima del blocco) e' la differenza previsione - programmato.
+
+    PERCHE' L'ALLINEAMENTO E NON IL MATCH DELLA SOLA PRIMA FERMATA: le
+    fermate GTT distano 1-5 minuti in orario; con una tolleranza di
+    minimi, una corsa in forte ritardo matchava la fermata ADIACENTE e
+    riportava un delay finto vicino a zero. Misurato dal vivo: su 123
+    corse solo-orari, 90 avevano uno scostamento reale >= 2 minuti e il
+    vecchio match ne mostrava 1. Con il blocco: 123/123 misurate (residui
+    32-154s su 5-12 fermate).
+
+    Ritorna il delay in secondi o None se nessun allineamento confidente
+    (spread oltre max_spread o delay oltre max_abs_delay): mai un numero a caso.
     """
-    if not sequence or not rt_arrival_ts:
+    if not sequence:
         return None
-    offset = _rome_offset_seconds(rt_arrival_ts)
-    base = ((rt_arrival_ts + offset) // 86400) * 86400 - offset
-    best = None
-    for sched, _stop_id in sequence:
-        for day_base in (base - 86400, base):
-            delay = rt_arrival_ts - (day_base + sched)
-            if abs(delay) <= tolerance and (best is None or abs(delay) < abs(best)):
-                best = delay
-    return best
+    if isinstance(feed_times, (int, float)):
+        feed_times = [feed_times]
+    times = sorted({int(t) for t in feed_times if t})
+    if not times:
+        return None
+    sched = [s for s, _ in sequence]
+    # Blocco piu' lungo della sequenza programmata = dati incoerenti (corsa
+    # sbagliata o feed corrotto): nessuna derivazione confidabile.
+    if len(times) > len(sched):
+        return None
+    m = len(times)
+    offset = _rome_offset_seconds(times[0])
+    base = ((times[0] + offset) // 86400) * 86400 - offset
+    best = None  # ((spread, |delay|), delay): spread minimo vince, a parita' il delay piu' piccolo
+    for day_base in (base - 86400, base):
+        for k in range(0, len(sched) - m + 1):
+            deltas = [times[i] - (day_base + sched[k + i]) for i in range(m)]
+            spread = max(deltas) - min(deltas)
+            d0 = deltas[0]
+            if abs(d0) > max_abs_delay or spread > max_spread:
+                continue
+            key = (spread, abs(d0))
+            if best is None or key < best[0]:
+                best = (key, d0)
+    return best[1] if best is not None else None
 
 DEFAULT_ALERT = {
     "alert_id": "gtt-alert-01",
@@ -592,30 +618,34 @@ async def _fetch_all_gtt_data_inner() -> dict:
         except Exception as exc:
             logger.warning("Sequenze fermate non disponibili (%s): nomi fermate limitati.", exc)
 
-    # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica le
-    # previsioni d'arrivo ASSOLUTE senza campo delay solo per le corse
-    # sostanzialmente puntuali (verificato sul feed reale: 96% entro +-60s
-    # dall'orario programmato, mediana 0). Lo standard GTFS-RT le tratterebbe
-    # tutte come 'in orario'; incrociando la previsione con l'orario
-    # programmato del GTFS-Static si deriva lo scostamento EFFETTIVO: le
-    # poche corse davvero in ritardo (~1 su 100) emergono, e non si inventa
-    # nulla (solo dati ufficiali GTT incrociati). Derivazione solo con match
-    # confidente (<=300s): oltre, l'abbinamento della fermata e' ambiguo.
+    # DELAY DERIVATO per le corse 'solo-orari' del feed GTT: GTT pubblica per
+    # queste corse solo previsioni d'arrivo ASSOLUTE (niente campo delay), in
+    # un blocco di fermate consecutive. Lo standard GTFS-RT le tratterebbe
+    # tutte come 'in orario': incrociando il blocco con l'orario programmato
+    # del GTFS-Static si deriva lo scostamento EFFETTIVO senza ambiguita'
+    # (allineamento a blocco, vedi _derive_delay_from_arrival). La vecchia
+    # stima '96% entro +-60s' era un artefatto circolare: misurata col vecchio
+    # match della singola fermata, che confondeva la fermata con quella
+    # adiacente e riportava ~0. Misura dal vivo con l'allineamento: su 123
+    # corse solo-orari, 47 in anticipo >= 2 min, 43 in ritardo >= 2 min.
     derived_count = 0
     for tu in trip_updates:
-        if tu.get("delay_seconds") != 0 or not tu.get("next_stop"):
+        if tu.get("delay_seconds") != 0:
             continue
         seq = trip_sequences.get(tu.get("trip_id") or "")
         if not seq:
             continue
-        derived = _derive_delay_from_arrival(seq, tu["next_stop"].get("arrival_ts") or 0)
+        times = tu.get("arrival_times") or []
+        if not times and tu.get("next_stop"):
+            times = [tu["next_stop"].get("arrival_ts") or 0]
+        derived = _derive_delay_from_arrival(seq, times)
         if derived is not None and derived != 0:
             tu["delay_seconds"] = int(derived)
             derived_count += 1
     if derived_count:
         # delay_by_trip cattura i valori: si ricostruisce dopo la derivazione.
         delay_by_trip = {tu.get("trip_id"): tu["delay_seconds"] for tu in trip_updates if tu.get("trip_id") and tu.get("delay_seconds") is not None}
-        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (senza campo delay nel feed).")
+        print(f"🕐 [SYNC] Delay derivato dal GTFS-Static per {derived_count} corse 'solo-orari' (allineamento a blocco, senza campo delay nel feed).")
 
     for v in vehicles:
         v["verifica"] = ("doppia_fonte"
