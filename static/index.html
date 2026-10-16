@@ -611,7 +611,11 @@
                 // stima, MAI spacciato per un fix GPS.
                 html += '<div class="popup-row" style="color:#8a8a86;">Posizione stimata · aggiornata ' + gpsTime + '</div>';
             } else {
-                html += '<div class="popup-row" style="color:#8a8a86;">GPS ' + gpsTime + (gpsAge != null ? ' (' + gpsAge + 's fa)' : '') + (gpsAge != null && gpsAge > 120 ? ' · segnale datato' : '') + '</div>';
+                // "ULTIMO fix": il contatore è l'età dell'ultimo fix ricevuto.
+                // Quando GTT ne pubblica uno nuovo (~ ogni 20-40s) l'orario
+                // avanza e il contatore RIPARTE da vicino zero: è il dato che
+                // si aggiorna, non un errore.
+                html += '<div class="popup-row" style="color:#8a8a86;">Ultimo fix GPS: ' + gpsTime + (gpsAge != null ? ' (' + gpsAge + 's fa)' : '') + (gpsAge != null && gpsAge > 120 ? ' · segnale datato' : '') + '</div>';
             }
             if (lineAlerts.length) {
                 html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
