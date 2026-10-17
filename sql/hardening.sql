@@ -35,12 +35,14 @@ ALTER TABLE public.gtt_routes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.gtt_vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.gtt_vehicle_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.gtt_alerts_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gtt_system_state ENABLE ROW LEVEL SECURITY;
 
 -- 5) Policy di negazione esplicite per anon e authenticated
 DROP POLICY IF EXISTS deny_anon_routes ON public.gtt_routes;
 DROP POLICY IF EXISTS deny_anon_vehicles ON public.gtt_vehicles;
 DROP POLICY IF EXISTS deny_anon_positions ON public.gtt_vehicle_positions;
 DROP POLICY IF EXISTS deny_anon_alerts ON public.gtt_alerts_history;
+DROP POLICY IF EXISTS deny_anon_system_state ON public.gtt_system_state;
 
 CREATE POLICY deny_anon_routes ON public.gtt_routes
     FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
@@ -49,4 +51,6 @@ CREATE POLICY deny_anon_vehicles ON public.gtt_vehicles
 CREATE POLICY deny_anon_positions ON public.gtt_vehicle_positions
     FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
 CREATE POLICY deny_anon_alerts ON public.gtt_alerts_history
+    FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+CREATE POLICY deny_anon_system_state ON public.gtt_system_state
     FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
