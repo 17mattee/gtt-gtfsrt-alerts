@@ -627,8 +627,9 @@
                 html += '<div class="popup-alerts"><div class="popup-label">Avvisi su questa linea · ' + lineAlerts.length + (devOnLine ? ' (' + devOnLine + ' deviazioni)' : '') + '</div>';
                 lineAlerts.slice(0, 2).forEach(al => { html += '<div class="popup-row" style="font-weight:600;color:#1a1a1a;">' + esc(al.header) + '</div>'; });
                 if (lineAlerts.length > 2) html += '<div class="popup-row" style="color:#8a8a86;">…e altre ' + (lineAlerts.length - 2) + '</div>';
+                html += '</div>';  // chiude popup-alerts (solo se aperto)
             }
-            html += '</div>';
+            html += '</div>';      // chiude il contenitore esterno del popup
             return html;
         }
 

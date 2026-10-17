@@ -17,3 +17,9 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      - key: OUTAGE_FLEET_TTL_S
+        sync: false
+      - key: SNAPSHOT_MAX_AGE_S
+        sync: false
+      - key: STATE_CLOUD_WRITE_SECONDS
+        sync: false
